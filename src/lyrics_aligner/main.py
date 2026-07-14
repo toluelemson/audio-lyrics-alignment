@@ -46,16 +46,20 @@ def main() -> None:
         logger=logger,
         diagnostics_interval_seconds=config.diagnostics_interval_seconds,
         device_name=getattr(source, "device_name", source.__class__.__name__),
+        silence_threshold_rms=config.silence_threshold_rms,
+        clipping_threshold_peak=config.clipping_threshold_peak,
     )
 
     report = runtime.run()
     logger.info(
-        "Audio ingestion finished source=%s sample_rate=%s block_size=%s chunks_received=%s chunks_dropped=%s queue_high_water_mark=%s",
+        "Audio ingestion finished source=%s sample_rate=%s block_size=%s chunks_received=%s chunks_dropped=%s silent_chunks=%s clipped_chunks=%s queue_high_water_mark=%s",
         config.audio_source,
         config.sample_rate,
         config.block_size,
         report.metrics.chunks_received,
         report.metrics.chunks_dropped,
+        report.metrics.silent_chunks,
+        report.metrics.clipped_chunks,
         report.metrics.queue_high_water_mark,
     )
 

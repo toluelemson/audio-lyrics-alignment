@@ -85,12 +85,16 @@ class AudioIngestionRuntime:
         logger: logging.Logger,
         diagnostics_interval_seconds: float = 0.5,
         device_name: str = "SimulatedAudioSource",
+        silence_threshold_rms: float = 0.01,
+        clipping_threshold_peak: float = 0.99,
     ) -> None:
         self._source = source
         self._queue = BoundedAudioQueue(queue_capacity)
         self._logger = logger
         self._diagnostics_interval_seconds = diagnostics_interval_seconds
         self._device_name = device_name
+        self._silence_threshold_rms = silence_threshold_rms
+        self._clipping_threshold_peak = clipping_threshold_peak
         self._metrics = RuntimeMetrics()
         self._metrics_lock = Lock()
         self._stop_requested = Event()
@@ -153,11 +157,16 @@ class AudioIngestionRuntime:
         squared = np.square(chunk.samples, dtype=np.float32)
         self._last_rms = float(np.sqrt(np.mean(squared, dtype=np.float32)))
         self._last_peak = float(np.max(np.abs(chunk.samples)))
+        with self._metrics_lock:
+            if self._last_rms <= self._silence_threshold_rms:
+                self._metrics.silent_chunks += 1
+            if self._last_peak >= self._clipping_threshold_peak:
+                self._metrics.clipped_chunks += 1
 
     def _log_diagnostics(self) -> None:
         metrics = self._snapshot_metrics()
         self._logger.info(
-            "device=%s rms=%.2f peak=%.2f queue=%s/%s chunks_received=%s chunks_dropped=%s",
+            "device=%s rms=%.2f peak=%.2f queue=%s/%s chunks_received=%s chunks_dropped=%s silent_chunks=%s clipped_chunks=%s",
             self._device_name,
             self._last_rms,
             self._last_peak,
@@ -165,6 +174,8 @@ class AudioIngestionRuntime:
             self._queue.capacity,
             metrics.chunks_received,
             metrics.chunks_dropped,
+            metrics.silent_chunks,
+            metrics.clipped_chunks,
         )
 
     def _snapshot_metrics(self) -> RuntimeMetrics:
@@ -172,6 +183,8 @@ class AudioIngestionRuntime:
             return RuntimeMetrics(
                 chunks_received=self._metrics.chunks_received,
                 chunks_dropped=self._metrics.chunks_dropped,
+                silent_chunks=self._metrics.silent_chunks,
+                clipped_chunks=self._metrics.clipped_chunks,
                 feature_frames_processed=self._metrics.feature_frames_processed,
                 invalid_inference_outputs=self._metrics.invalid_inference_outputs,
                 low_confidence_matches=self._metrics.low_confidence_matches,

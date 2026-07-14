@@ -44,6 +44,8 @@ def test_runtime_consumes_simulated_audio_and_returns_metrics(caplog: pytest.Log
 
     assert report.metrics.chunks_received == 3
     assert report.metrics.chunks_dropped == 0
+    assert report.metrics.silent_chunks == 0
+    assert report.metrics.clipped_chunks == 0
     assert report.metrics.queue_high_water_mark >= 1
     assert report.queue_size == 0
     assert report.peak == pytest.approx(0.25, rel=0.05)
@@ -54,3 +56,28 @@ def test_runtime_consumes_simulated_audio_and_returns_metrics(caplog: pytest.Log
 def test_bounded_audio_queue_rejects_non_positive_capacity() -> None:
     with pytest.raises(ValueError):
         BoundedAudioQueue(capacity=0)
+
+
+def test_runtime_counts_silent_and_clipped_chunks() -> None:
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.02,
+                frequency=250,
+                amplitude=1.0,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-thresholds"),
+        diagnostics_interval_seconds=1.0,
+        silence_threshold_rms=1.0,
+        clipping_threshold_peak=0.99,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.chunks_received == 2
+    assert report.metrics.silent_chunks == 2
+    assert report.metrics.clipped_chunks == 2
