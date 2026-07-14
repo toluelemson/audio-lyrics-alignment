@@ -73,7 +73,12 @@ def test_stop_unblocks_waiting_iterator() -> None:
         return stream
 
     source = MicrophoneAudioSource(
-        MicrophoneAudioConfig(sample_rate=1_000, channels=1, block_size=4, queue_timeout_seconds=0.01),
+        MicrophoneAudioConfig(
+            sample_rate=1_000,
+            channels=1,
+            block_size=4,
+            queue_timeout_seconds=0.01,
+        ),
         stream_factory=stream_factory,
     )
 

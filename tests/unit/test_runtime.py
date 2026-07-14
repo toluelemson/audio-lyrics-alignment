@@ -23,7 +23,9 @@ def test_bounded_audio_queue_drops_oldest_when_full() -> None:
     assert queue.get(timeout=0.001) is None
 
 
-def test_runtime_consumes_simulated_audio_and_returns_metrics(caplog: pytest.LogCaptureFixture) -> None:
+def test_runtime_consumes_simulated_audio_and_returns_metrics(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.INFO)
     runtime = AudioIngestionRuntime(
         source=SimulatedAudioSource(

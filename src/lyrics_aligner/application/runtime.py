@@ -166,7 +166,9 @@ class AudioIngestionRuntime:
     def _log_diagnostics(self) -> None:
         metrics = self._snapshot_metrics()
         self._logger.info(
-            "device=%s rms=%.2f peak=%.2f queue=%s/%s chunks_received=%s chunks_dropped=%s silent_chunks=%s clipped_chunks=%s",
+            "device=%s rms=%.2f peak=%.2f queue=%s/%s "
+            "chunks_received=%s chunks_dropped=%s "
+            "silent_chunks=%s clipped_chunks=%s",
             self._device_name,
             self._last_rms,
             self._last_peak,

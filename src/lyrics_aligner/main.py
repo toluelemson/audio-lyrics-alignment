@@ -52,7 +52,9 @@ def main() -> None:
 
     report = runtime.run()
     logger.info(
-        "Audio ingestion finished source=%s sample_rate=%s block_size=%s chunks_received=%s chunks_dropped=%s silent_chunks=%s clipped_chunks=%s queue_high_water_mark=%s",
+        "Audio ingestion finished source=%s sample_rate=%s block_size=%s "
+        "chunks_received=%s chunks_dropped=%s silent_chunks=%s "
+        "clipped_chunks=%s queue_high_water_mark=%s",
         config.audio_source,
         config.sample_rate,
         config.block_size,

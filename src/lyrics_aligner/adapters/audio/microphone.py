@@ -7,14 +7,25 @@ from dataclasses import dataclass
 from queue import Empty, Queue
 from threading import Event
 from time import monotonic
-from typing import TYPE_CHECKING, Any
+from typing import Protocol, cast
 
 import numpy as np
 
 from lyrics_aligner.domain.models import AudioChunk
 
-if TYPE_CHECKING:
-    import sounddevice as sd
+
+class AudioStream(Protocol):
+    def __enter__(self) -> AudioStream: ...
+
+    def __exit__(
+        self,
+        exc_type: object | None,
+        exc: BaseException | None,
+        tb: object | None,
+    ) -> None: ...
+
+
+StreamFactory = Callable[..., AudioStream]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,13 +44,12 @@ class MicrophoneAudioSource:
     def __init__(
         self,
         config: MicrophoneAudioConfig | None = None,
-        stream_factory: Callable[..., Any] | None = None,
+        stream_factory: StreamFactory | None = None,
     ) -> None:
         self._config = config or MicrophoneAudioConfig()
         self._stream_factory = stream_factory
-        self._chunks: Queue[AudioChunk | object] = Queue()
+        self._chunks: Queue[AudioChunk | None] = Queue()
         self._stop_requested = Event()
-        self._sentinel = object()
         self._sequence_number = 0
 
     @property
@@ -67,13 +77,13 @@ class MicrophoneAudioSource:
                         return
                     continue
 
-                if item is self._sentinel:
+                if item is None:
                     return
                 yield item
 
     def stop(self) -> None:
         self._stop_requested.set()
-        self._chunks.put_nowait(self._sentinel)
+        self._chunks.put_nowait(None)
 
     def _on_audio(
         self,
@@ -87,10 +97,7 @@ class MicrophoneAudioSource:
             return
 
         samples = np.asarray(indata, dtype=np.float32)
-        if samples.ndim == 2:
-            mono = samples[:, 0]
-        else:
-            mono = samples
+        mono = samples[:, 0] if samples.ndim == 2 else samples
 
         self._chunks.put_nowait(
             AudioChunk(
@@ -102,7 +109,7 @@ class MicrophoneAudioSource:
         self._sequence_number += 1
 
     @staticmethod
-    def _default_stream_factory() -> Callable[..., Any]:
-        import sounddevice as sd
+    def _default_stream_factory() -> StreamFactory:
+        import sounddevice as sd  # type: ignore[import-untyped]
 
-        return sd.InputStream
+        return cast(StreamFactory, sd.InputStream)
