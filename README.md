@@ -125,6 +125,33 @@ Prepared reference profile directory contents:
 - `metadata.json`: optional extra labels for future matching and presentation steps
 - optional `slides` list inside `profile.json`: slide cues with `slide_number`, `section`, `lyrics`, and `reference_timestamp`
 
+## Sprint 3 Reference Builder
+
+Build a reusable reference profile from a WAV file and slide cue JSON:
+
+```bash
+python tools/build_reference.py \
+  --audio amazing-grace.wav \
+  --slides amazing-grace-slides.json \
+  --output profiles/amazing-grace
+```
+
+Optional selectors:
+
+- `--profile-name amazing-grace`
+- `--feature-extractor simulated|onnx`
+- `--feature-model-path /absolute/path/to/model.onnx` when using `onnx`
+- `--block-size 4096`
+
+The builder:
+
+- reads WAV input
+- converts stereo to mono when needed
+- resamples to `16 kHz`
+- runs offline feature extraction
+- validates slide timestamps
+- writes `profile.json`, `reference_features.npy`, and `metadata.json`
+
 ## Testing The Current Sprint
 
 Quality checks:
@@ -291,6 +318,23 @@ Expected behavior:
 - diagnostics include `slide_triggers_sent`
 - final summary reports slide trigger counts
 
+Manual Sprint 3 builder test:
+
+```bash
+python tools/build_reference.py \
+  --audio amazing-grace.wav \
+  --slides amazing-grace-slides.json \
+  --output profiles/amazing-grace
+```
+
+Expected behavior:
+
+- the command prints a JSON summary
+- `profiles/amazing-grace/profile.json` is created
+- `profiles/amazing-grace/reference_features.npy` is created
+- `profiles/amazing-grace/metadata.json` is created
+- rerunning the command with the same inputs produces the same feature shape
+
 ## Documentation
 
 Documentation is expected to move with the code.
@@ -319,6 +363,7 @@ The current code also includes the first Sprint 2 vertical slice:
 - simple stabilization to reduce backward jumps and unconfirmed large jumps
 - slide resolution from stable matches to `SlideCommand`
 - logging presentation gateway for local slide-trigger visibility
+- offline reference profile builder CLI for Sprint 3
 - runtime accounting for `feature_frames_processed`
 - invalid feature frame detection via `invalid_inference_outputs`
 - match accounting via `accepted_matches` and `low_confidence_matches`

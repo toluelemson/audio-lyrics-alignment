@@ -23,12 +23,12 @@ def _write_profile_fixture(
     )
     (path / "profile.json").write_text(
         json.dumps(
-            profile
-            if profile is not None
-            else {
+            {
+                "profile_version": "1",
                 "name": "song-a",
                 "frame_duration_seconds": 0.25,
                 "timestamps_seconds": [0.0, 0.25],
+                **(profile or {}),
             }
         ),
         encoding="utf-8",
@@ -129,4 +129,22 @@ def test_load_raises_when_slide_definition_is_invalid(tmp_path: Path) -> None:
     repository = FilesystemReferenceProfileRepository()
 
     with pytest.raises(ValueError, match="slide_number|section|lyrics|reference_timestamp"):
+        repository.load(str(profile_path))
+
+
+def test_load_raises_when_profile_version_is_unsupported(tmp_path: Path) -> None:
+    profile_path = tmp_path / "profile"
+    _write_profile_fixture(
+        profile_path,
+        profile={
+            "profile_version": "999",
+            "name": "song-a",
+            "frame_duration_seconds": 0.25,
+            "timestamps_seconds": [0.0, 0.25],
+        },
+    )
+
+    repository = FilesystemReferenceProfileRepository()
+
+    with pytest.raises(ValueError, match="profile_version"):
         repository.load(str(profile_path))

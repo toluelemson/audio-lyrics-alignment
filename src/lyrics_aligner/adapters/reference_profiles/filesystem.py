@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from lyrics_aligner.application.reference_builder import PROFILE_VERSION
 from lyrics_aligner.domain.models import FeatureFrame, ReferenceProfile, SlideCue
 
 
@@ -23,6 +24,11 @@ class FilesystemReferenceProfileRepository:
         profile_data = self._read_json(base_path / "profile.json")
         features = self._read_features(base_path / "reference_features.npy")
         metadata = self._read_metadata(base_path / "metadata.json")
+        profile_version = profile_data.get("profile_version")
+        if profile_version != PROFILE_VERSION:
+            raise ValueError(
+                f"profile.json must contain supported profile_version={PROFILE_VERSION!r}"
+            )
 
         name = profile_data.get("name")
         if not isinstance(name, str) or not name.strip():

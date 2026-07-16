@@ -105,19 +105,20 @@
       working runtime path, not the full future product vision. The current
       codebase is an audio ingestion, diagnostics, and deterministic feature
       extraction pipeline with an ONNX-backed extractor path plus prepared
-      reference profile loading, baseline nearest-neighbor matching, a
-      simple stabilization layer, and slide resolution. It does not yet
-      perform real OSC output.
+      reference profile loading, an offline reference builder workflow,
+      baseline nearest-neighbor matching, a simple stabilization layer, and
+      slide resolution. It does not yet perform real OSC output.
     </p>
 
     <div class="callout">
       <strong>Current truth:</strong> the code already captures or simulates
       audio, pushes chunks through a bounded queue, computes basic signal
       diagnostics, extracts feature frames through either a deterministic or
-      ONNX-backed extractor, loads a prepared reference profile, runs a
-      baseline nearest-neighbor match, applies simple stabilization rules,
-      resolves slide commands from reference cues, and logs metrics. The more
-      advanced “lyrics alignment” parts are still planned, not runtime behavior yet.
+      ONNX-backed extractor, loads a prepared reference profile, can build one
+      offline from WAV plus slide JSON, runs a baseline nearest-neighbor match,
+      applies simple stabilization rules, resolves slide commands from
+      reference cues, and logs metrics. The more advanced “lyrics alignment”
+      parts are still planned, not runtime behavior yet.
     </div>
 
     <h2>1. Fast Summary</h2>
@@ -153,6 +154,9 @@
         |
         v
   optional reference profile load at startup
+        |
+        v
+  separate offline reference builder for reproducible profiles
         |
         v
   baseline nearest-neighbor match against reference frames
@@ -313,6 +317,21 @@
       <li><code>LYRICS_ALIGNER_FEATURE_EXTRACTOR</code></li>
       <li><code>LYRICS_ALIGNER_FEATURE_MODEL_PATH</code></li>
     </ul>
+
+    <h3>Sprint 3 Offline Builder</h3>
+    <p>
+      Sprint 3 adds a separate offline CLI that creates reusable profiles from
+      WAV recordings and slide cue JSON.
+    </p>
+    <pre>python tools/build_reference.py \
+  --audio amazing-grace.wav \
+  --slides amazing-grace-slides.json \
+  --output profiles/amazing-grace</pre>
+    <p>
+      That workflow reads WAV audio, converts it to mono, resamples it to
+      <code>16 kHz</code>, runs feature extraction, validates slide
+      timestamps, and writes the three on-disk profile artifacts.
+    </p>
 
     <h2>6. The Port Abstraction</h2>
     <p>
