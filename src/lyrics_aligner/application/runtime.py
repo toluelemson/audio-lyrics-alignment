@@ -9,8 +9,9 @@ from time import monotonic
 import numpy as np
 
 from lyrics_aligner.application.metrics import RuntimeMetrics
-from lyrics_aligner.domain.models import AudioChunk
+from lyrics_aligner.domain.models import AudioChunk, FeatureFrame
 from lyrics_aligner.ports.audio_source import AudioSource
+from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 
 
 class BoundedAudioQueue:
@@ -83,6 +84,7 @@ class AudioIngestionRuntime:
         source: AudioSource,
         queue_capacity: int,
         logger: logging.Logger,
+        feature_extractor: FeatureExtractor | None = None,
         diagnostics_interval_seconds: float = 0.5,
         device_name: str = "SimulatedAudioSource",
         silence_threshold_rms: float = 0.01,
@@ -91,6 +93,7 @@ class AudioIngestionRuntime:
         self._source = source
         self._queue = BoundedAudioQueue(queue_capacity)
         self._logger = logger
+        self._feature_extractor = feature_extractor
         self._diagnostics_interval_seconds = diagnostics_interval_seconds
         self._device_name = device_name
         self._silence_threshold_rms = silence_threshold_rms
@@ -162,13 +165,15 @@ class AudioIngestionRuntime:
                 self._metrics.silent_chunks += 1
             if self._last_peak >= self._clipping_threshold_peak:
                 self._metrics.clipped_chunks += 1
+        if self._feature_extractor is not None:
+            self._record_feature_frames(self._feature_extractor.extract(chunk))
 
     def _log_diagnostics(self) -> None:
         metrics = self._snapshot_metrics()
         self._logger.info(
             "device=%s rms=%.2f peak=%.2f queue=%s/%s "
             "chunks_received=%s chunks_dropped=%s "
-            "silent_chunks=%s clipped_chunks=%s",
+            "silent_chunks=%s clipped_chunks=%s feature_frames_processed=%s",
             self._device_name,
             self._last_rms,
             self._last_peak,
@@ -178,7 +183,22 @@ class AudioIngestionRuntime:
             metrics.chunks_dropped,
             metrics.silent_chunks,
             metrics.clipped_chunks,
+            metrics.feature_frames_processed,
         )
+
+    def _record_feature_frames(self, frames: list[FeatureFrame]) -> None:
+        valid_frames = 0
+        invalid_frames = 0
+        for frame in frames:
+            values = np.asarray(frame.values, dtype=np.float32)
+            if values.size == 0 or not np.isfinite(values).all():
+                invalid_frames += 1
+                continue
+            valid_frames += 1
+
+        with self._metrics_lock:
+            self._metrics.feature_frames_processed += valid_frames
+            self._metrics.invalid_inference_outputs += invalid_frames
 
     def _snapshot_metrics(self) -> RuntimeMetrics:
         with self._metrics_lock:

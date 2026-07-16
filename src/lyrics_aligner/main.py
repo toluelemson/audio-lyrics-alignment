@@ -7,9 +7,16 @@ from lyrics_aligner.adapters.audio import (
     SimulatedAudioConfig,
     SimulatedAudioSource,
 )
+from lyrics_aligner.adapters.features import (
+    OnnxFeatureExtractor,
+    OnnxFeatureExtractorConfig,
+    SimulatedFeatureExtractor,
+    SimulatedFeatureExtractorConfig,
+)
 from lyrics_aligner.application import AudioIngestionRuntime
 from lyrics_aligner.config import AppConfig
 from lyrics_aligner.ports.audio_source import AudioSource
+from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 
 
 def _build_audio_source(config: AppConfig) -> AudioSource:
@@ -33,6 +40,23 @@ def _build_audio_source(config: AppConfig) -> AudioSource:
     raise ValueError(f"Unsupported audio_source: {config.audio_source}")
 
 
+def _build_feature_extractor(config: AppConfig) -> FeatureExtractor:
+    if config.feature_extractor == "simulated":
+        return SimulatedFeatureExtractor(
+            SimulatedFeatureExtractorConfig(sample_rate=config.sample_rate)
+        )
+    if config.feature_extractor == "onnx":
+        if config.feature_model_path is None:
+            raise ValueError("feature_model_path is required when feature_extractor=onnx")
+        return OnnxFeatureExtractor(
+            OnnxFeatureExtractorConfig(
+                model_path=config.feature_model_path,
+                sample_rate=config.sample_rate,
+            )
+        )
+    raise ValueError(f"Unsupported feature_extractor: {config.feature_extractor}")
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the audio-to-lyrics ingestion runtime.",
@@ -47,6 +71,15 @@ def _parse_args() -> argparse.Namespace:
         help="Audio input device name or numeric device index.",
     )
     parser.add_argument(
+        "--feature-extractor",
+        choices=("simulated", "onnx"),
+        help="Choose the runtime feature extractor implementation.",
+    )
+    parser.add_argument(
+        "--feature-model-path",
+        help="Path to the ONNX feature extraction model when using --feature-extractor onnx.",
+    )
+    parser.add_argument(
         "--simulation-duration-seconds",
         type=float,
         help="Simulated audio duration when using the simulated source.",
@@ -59,14 +92,17 @@ def _config_from_args(args: argparse.Namespace) -> AppConfig:
     input_device: str | int | None = config.input_device
     if args.input_device is not None:
         input_device = int(args.input_device) if args.input_device.isdigit() else args.input_device
+    feature_model_path = args.feature_model_path or config.feature_model_path
 
     return AppConfig(
         audio_source=args.audio_source or config.audio_source,
+        feature_extractor=args.feature_extractor or config.feature_extractor,
         sample_rate=config.sample_rate,
         channels=config.channels,
         block_size=config.block_size,
         audio_queue_capacity=config.audio_queue_capacity,
         input_device=input_device,
+        feature_model_path=feature_model_path,
         simulation_duration_seconds=(
             args.simulation_duration_seconds
             if args.simulation_duration_seconds is not None
@@ -89,10 +125,12 @@ def main() -> None:
     config = _config_from_args(_parse_args())
     logger = logging.getLogger(__name__)
     source = _build_audio_source(config)
+    feature_extractor = _build_feature_extractor(config)
     runtime = AudioIngestionRuntime(
         source=source,
         queue_capacity=config.audio_queue_capacity,
         logger=logger,
+        feature_extractor=feature_extractor,
         diagnostics_interval_seconds=config.diagnostics_interval_seconds,
         device_name=getattr(source, "device_name", source.__class__.__name__),
         silence_threshold_rms=config.silence_threshold_rms,
@@ -101,16 +139,18 @@ def main() -> None:
 
     report = runtime.run()
     logger.info(
-        "Audio ingestion finished source=%s sample_rate=%s block_size=%s "
+        "Audio ingestion finished source=%s feature_extractor=%s sample_rate=%s block_size=%s "
         "chunks_received=%s chunks_dropped=%s silent_chunks=%s "
-        "clipped_chunks=%s queue_high_water_mark=%s",
+        "clipped_chunks=%s feature_frames_processed=%s queue_high_water_mark=%s",
         config.audio_source,
+        config.feature_extractor,
         config.sample_rate,
         config.block_size,
         report.metrics.chunks_received,
         report.metrics.chunks_dropped,
         report.metrics.silent_chunks,
         report.metrics.clipped_chunks,
+        report.metrics.feature_frames_processed,
         report.metrics.queue_high_water_mark,
     )
 

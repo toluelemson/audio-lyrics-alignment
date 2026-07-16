@@ -1,9 +1,12 @@
 import logging
 
+import numpy as np
 import pytest
 
 from lyrics_aligner.adapters.audio.simulated import SimulatedAudioConfig, SimulatedAudioSource
 from lyrics_aligner.application.runtime import AudioIngestionRuntime, BoundedAudioQueue
+from lyrics_aligner.domain.models import FeatureFrame
+from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 
 
 def test_bounded_audio_queue_drops_oldest_when_full() -> None:
@@ -48,6 +51,7 @@ def test_runtime_consumes_simulated_audio_and_returns_metrics(
     assert report.metrics.chunks_dropped == 0
     assert report.metrics.silent_chunks == 0
     assert report.metrics.clipped_chunks == 0
+    assert report.metrics.feature_frames_processed == 0
     assert report.metrics.queue_high_water_mark >= 1
     assert report.queue_size == 0
     assert report.peak == pytest.approx(0.25, rel=0.05)
@@ -83,3 +87,45 @@ def test_runtime_counts_silent_and_clipped_chunks() -> None:
     assert report.metrics.chunks_received == 2
     assert report.metrics.silent_chunks == 2
     assert report.metrics.clipped_chunks == 2
+
+
+class StubFeatureExtractor:
+    def extract(self, chunk: object) -> list[FeatureFrame]:
+        del chunk
+        return [
+            FeatureFrame(
+                values=np.array([0.1, 0.2], dtype=np.float32),
+                observed_at=1.0,
+                frame_duration_seconds=0.01,
+            ),
+            FeatureFrame(
+                values=np.array([np.nan], dtype=np.float32),
+                observed_at=1.0,
+                frame_duration_seconds=0.01,
+            ),
+        ]
+
+
+def test_runtime_counts_processed_and_invalid_feature_frames() -> None:
+    extractor: FeatureExtractor = StubFeatureExtractor()
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.02,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-features"),
+        feature_extractor=extractor,
+        diagnostics_interval_seconds=1.0,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.chunks_received == 2
+    assert report.metrics.feature_frames_processed == 2
+    assert report.metrics.invalid_inference_outputs == 2

@@ -103,15 +103,17 @@
     <p class="lead">
       This document explains the code as it exists today. It focuses on the
       working runtime path, not the full future product vision. The current
-      codebase is an audio ingestion and diagnostics pipeline. It does not yet
-      perform feature extraction, alignment, slide resolution, or OSC output.
+      codebase is an audio ingestion, diagnostics, and deterministic feature
+      extraction pipeline with an ONNX-backed extractor path. It does not yet
+      perform alignment, slide resolution, or OSC output.
     </p>
 
     <div class="callout">
       <strong>Current truth:</strong> the code already captures or simulates
       audio, pushes chunks through a bounded queue, computes basic signal
-      diagnostics, and logs metrics. The “lyrics alignment” parts are mostly
-      planned types and interfaces, not runtime behavior yet.
+      diagnostics, extracts feature frames through either a deterministic or
+      ONNX-backed extractor, and logs metrics. The “lyrics alignment” parts are
+      still mostly planned types and interfaces, not runtime behavior yet.
     </div>
 
     <h2>1. Fast Summary</h2>
@@ -143,6 +145,9 @@
   compute RMS / peak / silence / clipping
         |
         v
+  deterministic feature extraction
+        |
+        v
   RuntimeMetrics + log output + RuntimeReport</pre>
 
     <h2>2. Read Order</h2>
@@ -155,6 +160,8 @@
       <li><span class="file-ref">src/lyrics_aligner/application/metrics.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/audio/simulated.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/audio/microphone.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/features/simulated.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/features/onnx_runtime.py</span></li>
     </ol>
 
     <h2>3. Package-Level Mental Model</h2>
@@ -176,8 +183,9 @@
       <div class="card">
         <h3>adapters</h3>
         <p>
-          Concrete implementations. Right now there are two audio adapters:
-          simulated and microphone.
+          Concrete implementations. Right now there are simulated and microphone
+          audio adapters plus deterministic and ONNX-backed feature extractor
+          adapters.
         </p>
       </div>
       <div class="card">
@@ -455,11 +463,63 @@ self._items.append(item)</pre>
       <li>clipped if <code>peak &gt;= clipping_threshold_peak</code></li>
     </ul>
     <p>
-      That is the entire signal-analysis stage at the moment. It exists to
-      validate the runtime path before more complex feature extraction is added.
+      After those diagnostics, the runtime optionally passes the chunk into a
+      feature extractor. The default path uses a deterministic simulated
+      extractor, but there is now an ONNX-backed extractor behind the same port.
     </p>
 
-    <h2>13. Metrics</h2>
+    <h2>13. Feature Extraction Stage</h2>
+    <p>
+      The code now has two feature extraction adapters:
+    </p>
+    <ul>
+      <li><span class="file-ref">adapters/features/simulated.py</span></li>
+      <li><span class="file-ref">adapters/features/onnx_runtime.py</span></li>
+    </ul>
+    <p>
+      Both implement the same <code>FeatureExtractor</code> port and both
+      convert an <code>AudioChunk</code> into one or more
+      <code>FeatureFrame</code> values.
+    </p>
+
+    <h3>Deterministic Simulated Extractor</h3>
+    <p>
+      The simulated extractor is the first Sprint 2 slice. It converts an
+      <code>AudioChunk</code> into a single <code>FeatureFrame</code> with a
+      small deterministic vector.
+    </p>
+    <p>The simulated extractor currently encodes:</p>
+    <ul>
+      <li>RMS</li>
+      <li>peak</li>
+      <li>mean absolute amplitude</li>
+      <li>zero-crossing rate</li>
+    </ul>
+    <p>
+      The point is not model quality yet. The point is to prove the runtime can
+      hand chunks into a feature extraction stage and count valid versus invalid
+      outputs.
+    </p>
+
+    <h3>ONNX Runtime Extractor</h3>
+    <p>
+      The ONNX adapter loads a model path, inspects the first input and output
+      names from the inference session, normalizes waveform amplitude, runs the
+      model, and converts the output tensor into one or more
+      <code>FeatureFrame</code> objects.
+    </p>
+    <p>
+      This path is now available, but it still depends on you providing a real
+      model file through configuration.
+    </p>
+
+    <h3>Runtime Handling Of Feature Frames</h3>
+    <ul>
+      <li>valid frames increment <code>feature_frames_processed</code></li>
+      <li>empty or non-finite frames increment <code>invalid_inference_outputs</code></li>
+    </ul>
+
+    <h2>14. Metrics</h2>
     <p>
       <span class="file-ref">application/metrics.py</span> stores counters in a
       mutable dataclass.
@@ -471,13 +531,15 @@ self._items.append(item)</pre>
       <li><code>silent_chunks</code></li>
       <li><code>clipped_chunks</code></li>
       <li><code>queue_high_water_mark</code></li>
+      <li><code>feature_frames_processed</code></li>
+      <li><code>invalid_inference_outputs</code></li>
     </ul>
     <p>
       Other counters are placeholders for future stages such as feature
       extraction, matching, and presentation output.
     </p>
 
-    <h2>14. Logging and RuntimeReport</h2>
+    <h2>15. Logging and RuntimeReport</h2>
     <p>
       The runtime periodically emits a log line with the latest values. At the
       end, it returns a <code>RuntimeReport</code>.
@@ -490,6 +552,7 @@ chunks_received=...
 chunks_dropped=...
 silent_chunks=...
 clipped_chunks=...</pre>
+feature_frames_processed=...</pre>
     <p>
       <code>RuntimeReport</code> is effectively the final snapshot returned to
       <code>main()</code>. It contains:
@@ -502,7 +565,7 @@ clipped_chunks=...</pre>
       <li>final queue size and capacity</li>
     </ul>
 
-    <h2>15. Threading Model</h2>
+    <h2>16. Threading Model</h2>
     <p>The current runtime has a simple but important threading model:</p>
     <ul>
       <li>main thread: consumer loop + periodic logging</li>
@@ -520,7 +583,7 @@ clipped_chunks=...</pre>
       <li>main-thread consumer processes them</li>
     </ol>
 
-    <h2>16. Shutdown Behavior</h2>
+    <h2>17. Shutdown Behavior</h2>
     <p>
       Shutdown is coordinated through events and queue closing.
     </p>
@@ -536,10 +599,9 @@ clipped_chunks=...</pre>
       pushes a sentinel through its internal queue.
     </p>
 
-    <h2>17. What the Code Does Not Yet Do</h2>
+    <h2>18. What the Code Does Not Yet Do</h2>
     <p>These planned concepts exist in shape but not in runtime behavior:</p>
     <ul>
-      <li><code>FeatureFrame</code>: no feature extractor uses it yet</li>
       <li><code>MatchResult</code>: no alignment engine produces it yet</li>
       <li><code>SlideCommand</code>: no presentation adapter sends it yet</li>
     </ul>
@@ -550,7 +612,7 @@ clipped_chunks=...</pre>
       plug into.
     </p>
 
-    <h2>18. End-to-End Example: Simulated Mode</h2>
+    <h2>19. End-to-End Example: Simulated Mode</h2>
     <pre>.venv/bin/python -m lyrics_aligner.main
 
 1. main parses args
@@ -560,10 +622,11 @@ clipped_chunks=...</pre>
 5. simulated source yields timed sine-wave chunks
 6. producer inserts them into BoundedAudioQueue
 7. consumer computes RMS/peak on each chunk
-8. periodic logs are emitted
-9. final RuntimeReport is returned and logged</pre>
+8. simulated feature extractor produces one FeatureFrame per chunk
+9. periodic logs are emitted
+10. final RuntimeReport is returned and logged</pre>
 
-    <h2>19. End-to-End Example: Microphone Mode</h2>
+    <h2>20. End-to-End Example: Microphone Mode</h2>
     <pre>.venv/bin/python -m lyrics_aligner.main --audio-source microphone --input-device "Built-in Microphone"
 
 1. main parses args
@@ -574,15 +637,33 @@ clipped_chunks=...</pre>
 6. callback converts frames to AudioChunk and enqueues them internally
 7. microphone source iterator yields those chunks
 8. runtime producer inserts them into the bounded queue
-9. runtime consumer computes diagnostics and logs metrics</pre>
+9. runtime consumer computes diagnostics and feature frames, then logs metrics</pre>
 
-    <h2>20. Best Way to Understand the Code in Practice</h2>
+    <h2>21. End-to-End Example: ONNX Extractor Mode</h2>
+    <pre>.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor onnx \
+  --feature-model-path /absolute/path/to/model.onnx
+
+1. main parses args
+2. config resolves to feature_extractor=onnx
+3. simulated audio source is created
+4. ONNX feature extractor is created from the model path
+5. runtime producer yields chunks into the bounded queue
+6. runtime consumer computes diagnostics
+7. runtime calls the ONNX extractor for each chunk
+8. returned feature frames are validated and counted
+9. periodic logs and final RuntimeReport include feature frame metrics</pre>
+
+    <h2>22. Best Way to Understand the Code in Practice</h2>
     <ol>
       <li>Run simulated mode first.</li>
       <li>Read <span class="file-ref">main.py</span> top to bottom.</li>
       <li>Read <span class="file-ref">runtime.py</span> next.</li>
       <li>Then read <span class="file-ref">simulated.py</span>.</li>
       <li>Only after that read <span class="file-ref">microphone.py</span>.</li>
+      <li>Then read <span class="file-ref">adapters/features/simulated.py</span>.</li>
+      <li>Finally read <span class="file-ref">adapters/features/onnx_runtime.py</span>.</li>
     </ol>
     <p>
       That order works because simulated mode is the simplest executable path.
@@ -590,7 +671,75 @@ clipped_chunks=...</pre>
       plumbing before you understand the system around it.
     </p>
 
-    <h2>21. Final Takeaway</h2>
+    <h2>23. How To Test The Current Sprint</h2>
+    <p>
+      The current sprint is mostly about proving the ingestion path works
+      reliably. That means testing should cover both code quality and runtime
+      behavior.
+    </p>
+
+    <h3>Quality Checks</h3>
+    <pre>.venv/bin/pytest
+.venv/bin/ruff check .
+/private/tmp/audio-lyrics-py311-test/bin/mypy src</pre>
+    <p>Those commands validate tests, style, and typing.</p>
+
+    <h3>Walkthrough PDF Check</h3>
+    <pre>python3 scripts/generate_runtime_walkthrough_pdf.py
+git diff --exit-code -- docs/runtime-flow-walkthrough.pdf</pre>
+    <p>
+      If the HTML walkthrough changes, the PDF should change with it. The
+      second command confirms the checked-in PDF is current.
+    </p>
+
+    <h3>Manual Simulated Runtime Test</h3>
+    <pre>.venv/bin/python -m lyrics_aligner.main --audio-source simulated --simulation-duration-seconds 5.0</pre>
+    <p>Expected results:</p>
+    <ul>
+      <li><code>chunks_received</code> rises steadily</li>
+      <li><code>chunks_dropped=0</code></li>
+      <li><code>queue_high_water_mark</code> stays low</li>
+      <li><code>rms</code> stays around <code>0.35</code></li>
+      <li><code>peak</code> stays around <code>0.50</code></li>
+      <li><code>silent_chunks=0</code></li>
+      <li><code>clipped_chunks=0</code></li>
+      <li><code>feature_frames_processed</code> rises with each processed chunk</li>
+    </ul>
+
+    <h3>Manual Microphone Runtime Test</h3>
+    <pre>.venv/bin/python -c "import sounddevice as sd; print(sd.query_devices())"
+.venv/bin/python -m lyrics_aligner.main --audio-source microphone --input-device "Built-in Microphone"</pre>
+    <p>Expected results:</p>
+    <ul>
+      <li><code>chunks_received</code> rises continuously</li>
+      <li><code>chunks_dropped=0</code> under normal conditions</li>
+      <li><code>silent_chunks</code> rises in a quiet room</li>
+      <li><code>rms</code> and <code>peak</code> rise when speaking</li>
+      <li><code>clipped_chunks</code> stays low unless the input is too hot</li>
+    </ul>
+
+    <h3>Manual ONNX Extractor Wiring Test</h3>
+    <pre>.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor onnx \
+  --feature-model-path /absolute/path/to/model.onnx</pre>
+    <p>Expected results:</p>
+    <ul>
+      <li>the process starts without feature-extractor configuration errors</li>
+      <li><code>feature_frames_processed</code> rises when the model returns valid output</li>
+      <li><code>invalid_inference_outputs</code> stays low for a healthy model</li>
+    </ul>
+
+    <h3>What A Passing Sprint Looks Like</h3>
+    <ul>
+      <li>simulated mode runs without dropped chunks</li>
+      <li>microphone mode captures real input and reacts to silence/speech</li>
+      <li>the queue stays bounded without backlog growth</li>
+      <li>quality checks pass</li>
+      <li>the walkthrough PDF is regenerated and checked in</li>
+    </ul>
+
+    <h2>24. Final Takeaway</h2>
     <p>
       The current code is a well-structured real-time ingestion skeleton:
     </p>
@@ -598,13 +747,12 @@ clipped_chunks=...</pre>
       <li>configuration comes in through config/env/CLI</li>
       <li>an adapter yields <code>AudioChunk</code> objects</li>
       <li>the runtime protects itself with a bounded queue</li>
-      <li>processing currently means diagnostics, not alignment</li>
+      <li>processing currently means diagnostics plus feature extraction, not alignment</li>
       <li>metrics and logging show whether the ingestion path behaves correctly</li>
     </ul>
     <p>
       Once you understand that, the rest of the future system is easier to
-      imagine: feature extraction will replace “compute RMS/peak only,” and
-      alignment plus slide decisions will sit downstream of the same runtime
+      imagine: alignment plus slide decisions will sit downstream of the same runtime
       backbone.
     </p>
   </body>

@@ -32,11 +32,13 @@ def _read_optional_device(name: str) -> str | int | None:
 @dataclass(frozen=True, slots=True)
 class AppConfig:
     audio_source: str = "simulated"
+    feature_extractor: str = "simulated"
     sample_rate: int = 16_000
     channels: int = 1
     block_size: int = 4_096
     audio_queue_capacity: int = 16
     input_device: str | int | None = None
+    feature_model_path: str | None = None
     simulation_duration_seconds: float = 2.0
     diagnostics_interval_seconds: float = 0.5
     silence_threshold_rms: float = 0.01
@@ -49,11 +51,13 @@ class AppConfig:
     def from_env(cls) -> AppConfig:
         return cls(
             audio_source=_read_str("LYRICS_ALIGNER_AUDIO_SOURCE", "simulated"),
+            feature_extractor=_read_str("LYRICS_ALIGNER_FEATURE_EXTRACTOR", "simulated"),
             sample_rate=_read_int("LYRICS_ALIGNER_SAMPLE_RATE", 16_000),
             channels=_read_int("LYRICS_ALIGNER_CHANNELS", 1),
             block_size=_read_int("LYRICS_ALIGNER_BLOCK_SIZE", 4_096),
             audio_queue_capacity=_read_int("LYRICS_ALIGNER_AUDIO_QUEUE_CAPACITY", 16),
             input_device=_read_optional_device("LYRICS_ALIGNER_INPUT_DEVICE"),
+            feature_model_path=os.getenv("LYRICS_ALIGNER_FEATURE_MODEL_PATH"),
             simulation_duration_seconds=_read_float(
                 "LYRICS_ALIGNER_SIMULATION_DURATION_SECONDS",
                 2.0,
