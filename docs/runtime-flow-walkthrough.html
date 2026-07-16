@@ -207,6 +207,7 @@
       <li>parse CLI arguments</li>
       <li>load environment-driven configuration</li>
       <li>construct the selected audio source</li>
+      <li>construct the selected feature extractor</li>
       <li>construct the runtime</li>
       <li>run the runtime and log the final summary</li>
     </ul>
@@ -221,6 +222,7 @@
       <li><code>_parse_args()</code> reads CLI flags.</li>
       <li><code>_config_from_args()</code> merges CLI args with env-based defaults.</li>
       <li><code>_build_audio_source()</code> returns an <code>AudioSource</code>.</li>
+      <li><code>_build_feature_extractor()</code> returns a <code>FeatureExtractor</code>.</li>
       <li><code>AudioIngestionRuntime(...)</code> is created.</li>
       <li><code>runtime.run()</code> starts producer/consumer processing.</li>
       <li>A final summary log line is emitted from the returned report.</li>
@@ -242,11 +244,13 @@
     <h3>Important Fields</h3>
     <ul>
       <li><code>audio_source</code>: selects <code>simulated</code> or <code>microphone</code></li>
+      <li><code>feature_extractor</code>: selects <code>simulated</code> or <code>onnx</code></li>
       <li><code>sample_rate</code>: audio sampling frequency</li>
       <li><code>channels</code>: currently expected to be mono for the main path</li>
       <li><code>block_size</code>: samples per chunk</li>
       <li><code>audio_queue_capacity</code>: bounded queue size in the runtime</li>
       <li><code>input_device</code>: microphone device name or index</li>
+      <li><code>feature_model_path</code>: ONNX model path when ONNX extraction is selected</li>
       <li><code>simulation_duration_seconds</code>: simulated stream length</li>
       <li><code>diagnostics_interval_seconds</code>: log cadence</li>
       <li><code>silence_threshold_rms</code>: threshold for silent chunk counting</li>
@@ -263,6 +267,12 @@
     <pre>hardcoded defaults
     -> environment variables
     -> CLI arguments</pre>
+
+    <p>Important extractor-related environment variables now include:</p>
+    <ul>
+      <li><code>LYRICS_ALIGNER_FEATURE_EXTRACTOR</code></li>
+      <li><code>LYRICS_ALIGNER_FEATURE_MODEL_PATH</code></li>
+    </ul>
 
     <h2>6. The Port Abstraction</h2>
     <p>

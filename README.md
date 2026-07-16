@@ -47,6 +47,12 @@ ONNX feature extraction:
   --feature-model-path /absolute/path/to/model.onnx
 ```
 
+Relevant runtime selectors:
+
+- `--audio-source simulated|microphone`
+- `--feature-extractor simulated|onnx`
+- `--feature-model-path /absolute/path/to/model.onnx` when using `onnx`
+
 Microphone input:
 
 ```bash
@@ -59,6 +65,14 @@ Environment variables are also supported:
 export LYRICS_ALIGNER_AUDIO_SOURCE=microphone
 export LYRICS_ALIGNER_INPUT_DEVICE="Built-in Microphone"
 .venv/bin/python -m lyrics_aligner.main
+```
+
+Feature extraction can also be configured with environment variables:
+
+```bash
+export LYRICS_ALIGNER_FEATURE_EXTRACTOR=onnx
+export LYRICS_ALIGNER_FEATURE_MODEL_PATH=/absolute/path/to/model.onnx
+.venv/bin/python -m lyrics_aligner.main --audio-source simulated
 ```
 
 ## Testing The Current Sprint
