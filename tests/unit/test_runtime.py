@@ -7,10 +7,13 @@ from lyrics_aligner.adapters.audio.simulated import SimulatedAudioConfig, Simula
 from lyrics_aligner.adapters.matching import (
     NearestNeighborFeatureMatcher,
     NearestNeighborFeatureMatcherConfig,
+    StabilizedFeatureMatcher,
+    StabilizedFeatureMatcherConfig,
 )
 from lyrics_aligner.application.runtime import AudioIngestionRuntime, BoundedAudioQueue
-from lyrics_aligner.domain.models import FeatureFrame, ReferenceProfile
+from lyrics_aligner.domain.models import FeatureFrame, MatchResult, ReferenceProfile
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
+from lyrics_aligner.ports.feature_matcher import FeatureMatcher
 
 
 def test_bounded_audio_queue_drops_oldest_when_full() -> None:
@@ -236,3 +239,71 @@ def test_runtime_counts_low_confidence_matches() -> None:
     assert report.metrics.low_confidence_matches == 1
     assert report.last_match is not None
     assert report.last_match.valid is False
+
+
+class RepeatingFeatureExtractor:
+    def extract(self, chunk: object) -> list[FeatureFrame]:
+        del chunk
+        return [
+            FeatureFrame(
+                values=np.array([0.1, 0.2], dtype=np.float32),
+                observed_at=1.0,
+                frame_duration_seconds=0.01,
+            )
+        ]
+
+
+class SequenceMatcher:
+    def __init__(self, results: list[MatchResult]) -> None:
+        self._results = results
+        self._index = 0
+
+    def match(self, frame: FeatureFrame) -> MatchResult:
+        del frame
+        result = self._results[self._index]
+        self._index += 1
+        return result
+
+
+def test_runtime_uses_stabilizer_to_filter_large_forward_jump() -> None:
+    extractor: FeatureExtractor = RepeatingFeatureExtractor()
+    raw_matcher: FeatureMatcher = SequenceMatcher(
+        [
+            MatchResult(1, 0.25, 0.1, 0.1, 0.95, True),
+            MatchResult(4, 1.0, 0.1, 0.1, 0.95, True),
+            MatchResult(4, 1.0, 0.1, 0.1, 0.95, True),
+        ]
+    )
+    matcher = StabilizedFeatureMatcher(
+        raw_matcher,
+        StabilizedFeatureMatcherConfig(
+            max_forward_jump_frames=4,
+            large_jump_threshold_frames=1,
+            confirmation_count=2,
+        ),
+    )
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.03,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-stabilized-matches"),
+        feature_extractor=extractor,
+        feature_matcher=matcher,
+        diagnostics_interval_seconds=1.0,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.feature_frames_processed == 3
+    assert report.metrics.accepted_matches == 2
+    assert report.metrics.low_confidence_matches == 1
+    assert report.last_match is not None
+    assert report.last_match.reference_frame == 4
+    assert report.last_match.valid is True

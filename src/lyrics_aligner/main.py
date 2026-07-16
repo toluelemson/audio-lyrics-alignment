@@ -16,6 +16,8 @@ from lyrics_aligner.adapters.features import (
 from lyrics_aligner.adapters.matching import (
     NearestNeighborFeatureMatcher,
     NearestNeighborFeatureMatcherConfig,
+    StabilizedFeatureMatcher,
+    StabilizedFeatureMatcherConfig,
 )
 from lyrics_aligner.adapters.reference_profiles import (
     FilesystemReferenceProfileRepository,
@@ -79,10 +81,18 @@ def _build_feature_matcher(
 ) -> FeatureMatcher | None:
     if profile is None:
         return None
-    return NearestNeighborFeatureMatcher(
+    matcher = NearestNeighborFeatureMatcher(
         profile,
         NearestNeighborFeatureMatcherConfig(
             confidence_threshold=config.match_confidence_threshold,
+        ),
+    )
+    return StabilizedFeatureMatcher(
+        matcher,
+        StabilizedFeatureMatcherConfig(
+            max_forward_jump_frames=config.match_max_forward_jump_frames,
+            large_jump_threshold_frames=config.match_large_jump_threshold_frames,
+            confirmation_count=config.match_confirmation_count,
         ),
     )
 
@@ -123,6 +133,21 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         help="Confidence threshold used to accept feature matches.",
     )
+    parser.add_argument(
+        "--match-max-forward-jump-frames",
+        type=int,
+        help="Largest forward frame jump accepted without rejecting the match.",
+    )
+    parser.add_argument(
+        "--match-large-jump-threshold-frames",
+        type=int,
+        help="Forward jump size that begins requiring repeated confirmation.",
+    )
+    parser.add_argument(
+        "--match-confirmation-count",
+        type=int,
+        help="Number of repeated large-jump matches required before acceptance.",
+    )
     return parser.parse_args()
 
 
@@ -138,12 +163,30 @@ def _config_from_args(args: argparse.Namespace) -> AppConfig:
         if args.match_confidence_threshold is not None
         else config.match_confidence_threshold
     )
+    match_max_forward_jump_frames = (
+        args.match_max_forward_jump_frames
+        if args.match_max_forward_jump_frames is not None
+        else config.match_max_forward_jump_frames
+    )
+    match_large_jump_threshold_frames = (
+        args.match_large_jump_threshold_frames
+        if args.match_large_jump_threshold_frames is not None
+        else config.match_large_jump_threshold_frames
+    )
+    match_confirmation_count = (
+        args.match_confirmation_count
+        if args.match_confirmation_count is not None
+        else config.match_confirmation_count
+    )
 
     return AppConfig(
         audio_source=args.audio_source or config.audio_source,
         feature_extractor=args.feature_extractor or config.feature_extractor,
         reference_profile_path=reference_profile_path,
         match_confidence_threshold=match_confidence_threshold,
+        match_max_forward_jump_frames=match_max_forward_jump_frames,
+        match_large_jump_threshold_frames=match_large_jump_threshold_frames,
+        match_confirmation_count=match_confirmation_count,
         sample_rate=config.sample_rate,
         channels=config.channels,
         block_size=config.block_size,

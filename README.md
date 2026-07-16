@@ -67,6 +67,19 @@ With baseline matching against the loaded reference profile:
   --match-confidence-threshold 0.6
 ```
 
+With simple match stabilization:
+
+```bash
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor simulated \
+  --reference-profile-path /absolute/path/to/reference-profile \
+  --match-confidence-threshold 0.6 \
+  --match-max-forward-jump-frames 4 \
+  --match-large-jump-threshold-frames 2 \
+  --match-confirmation-count 2
+```
+
 Relevant runtime selectors:
 
 - `--audio-source simulated|microphone`
@@ -74,6 +87,9 @@ Relevant runtime selectors:
 - `--feature-model-path /absolute/path/to/model.onnx` when using `onnx`
 - `--reference-profile-path /absolute/path/to/reference-profile`
 - `--match-confidence-threshold 0.0-1.0`
+- `--match-max-forward-jump-frames`
+- `--match-large-jump-threshold-frames`
+- `--match-confirmation-count`
 
 Microphone input:
 
@@ -96,6 +112,9 @@ export LYRICS_ALIGNER_FEATURE_EXTRACTOR=onnx
 export LYRICS_ALIGNER_FEATURE_MODEL_PATH=/absolute/path/to/model.onnx
 export LYRICS_ALIGNER_REFERENCE_PROFILE_PATH=/absolute/path/to/reference-profile
 export LYRICS_ALIGNER_MATCH_CONFIDENCE_THRESHOLD=0.6
+export LYRICS_ALIGNER_MATCH_MAX_FORWARD_JUMP_FRAMES=4
+export LYRICS_ALIGNER_MATCH_LARGE_JUMP_THRESHOLD_FRAMES=2
+export LYRICS_ALIGNER_MATCH_CONFIRMATION_COUNT=2
 .venv/bin/python -m lyrics_aligner.main --audio-source simulated
 ```
 
@@ -222,6 +241,12 @@ Expected behavior:
 - `last_reference_timestamp` changes from `none` once matching begins
 - the final summary includes match counts
 
+Expected stabilization behavior:
+
+- small forward moves are accepted immediately
+- backward jumps are rejected
+- bigger forward jumps need repeated confirmation before acceptance
+
 ## Documentation
 
 Documentation is expected to move with the code.
@@ -247,8 +272,9 @@ The current code also includes the first Sprint 2 vertical slice:
 - ONNX-backed feature extraction behind the same `FeatureExtractor` port
 - filesystem-backed loading of prepared reference profiles
 - nearest-neighbor matching from live feature frames to reference frames
+- simple stabilization to reduce backward jumps and unconfirmed large jumps
 - runtime accounting for `feature_frames_processed`
 - invalid feature frame detection via `invalid_inference_outputs`
 - match accounting via `accepted_matches` and `low_confidence_matches`
 
-Slide decisions, match smoothing, and OSC triggering are still follow-up work.
+Slide decisions, richer smoothing, and OSC triggering are still follow-up work.

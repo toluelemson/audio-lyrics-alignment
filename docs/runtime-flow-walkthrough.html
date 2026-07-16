@@ -105,8 +105,9 @@
       working runtime path, not the full future product vision. The current
       codebase is an audio ingestion, diagnostics, and deterministic feature
       extraction pipeline with an ONNX-backed extractor path plus prepared
-      reference profile loading and baseline nearest-neighbor matching. It
-      does not yet perform slide resolution or OSC output.
+      reference profile loading, baseline nearest-neighbor matching, and a
+      simple stabilization layer. It does not yet perform slide resolution or
+      OSC output.
     </p>
 
     <div class="callout">
@@ -114,8 +115,9 @@
       audio, pushes chunks through a bounded queue, computes basic signal
       diagnostics, extracts feature frames through either a deterministic or
       ONNX-backed extractor, loads a prepared reference profile, runs a
-      baseline nearest-neighbor match, and logs metrics. The more advanced
-      “lyrics alignment” parts are still planned, not runtime behavior yet.
+      baseline nearest-neighbor match, applies simple stabilization rules,
+      and logs metrics. The more advanced “lyrics alignment” parts are still
+      planned, not runtime behavior yet.
     </div>
 
     <h2>1. Fast Summary</h2>
@@ -156,6 +158,9 @@
   baseline nearest-neighbor match against reference frames
         |
         v
+  simple stabilization of backward and large forward jumps
+        |
+        v
   RuntimeMetrics + log output + RuntimeReport</pre>
 
     <h2>2. Read Order</h2>
@@ -172,6 +177,7 @@
       <li><span class="file-ref">src/lyrics_aligner/adapters/features/onnx_runtime.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/reference_profiles/filesystem.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/nearest_neighbor.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/matching/stabilized.py</span></li>
     </ol>
 
     <h2>3. Package-Level Mental Model</h2>
@@ -200,7 +206,7 @@
           Concrete implementations. Right now there are simulated and microphone
           audio adapters plus deterministic and ONNX-backed feature extractor
           adapters, a filesystem-backed reference profile adapter, and a
-          nearest-neighbor matcher adapter.
+          nearest-neighbor matcher adapter plus a stabilizing wrapper.
         </p>
       </div>
       <div class="card">
@@ -224,7 +230,7 @@
       <li>construct the selected audio source</li>
       <li>construct the selected feature extractor</li>
       <li>optionally load the selected reference profile directory</li>
-      <li>optionally construct the matcher for the loaded profile</li>
+      <li>optionally construct the matcher and stabilizer for the loaded profile</li>
       <li>construct the runtime</li>
       <li>run the runtime and log the final summary</li>
     </ul>
@@ -241,7 +247,7 @@
       <li>If configured, the reference profile repository loads prepared profile artifacts from disk.</li>
       <li><code>_build_audio_source()</code> returns an <code>AudioSource</code>.</li>
       <li><code>_build_feature_extractor()</code> returns a <code>FeatureExtractor</code>.</li>
-      <li><code>_build_feature_matcher()</code> returns a baseline matcher when a reference profile is present.</li>
+      <li><code>_build_feature_matcher()</code> returns a baseline matcher wrapped in a simple stabilizer when a reference profile is present.</li>
       <li><code>AudioIngestionRuntime(...)</code> is created.</li>
       <li><code>runtime.run()</code> starts producer/consumer processing.</li>
       <li>A final summary log line is emitted from the returned report.</li>
@@ -266,6 +272,9 @@
       <li><code>feature_extractor</code>: selects <code>simulated</code> or <code>onnx</code></li>
       <li><code>reference_profile_path</code>: directory containing prepared reference features and metadata</li>
       <li><code>match_confidence_threshold</code>: minimum confidence required to accept a match</li>
+      <li><code>match_max_forward_jump_frames</code>: largest forward jump the stabilizer allows</li>
+      <li><code>match_large_jump_threshold_frames</code>: jump size that starts requiring repeated confirmation</li>
+      <li><code>match_confirmation_count</code>: repeated matches required before accepting a large jump</li>
       <li><code>sample_rate</code>: audio sampling frequency</li>
       <li><code>channels</code>: currently expected to be mono for the main path</li>
       <li><code>block_size</code>: samples per chunk</li>

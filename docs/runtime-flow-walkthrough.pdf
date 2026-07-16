@@ -9,7 +9,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 4 0 R >>
 endobj
 4 0 obj
-<< /Length 3538 >>
+<< /Length 3605 >>
 stream
 BT
 /F1 11 Tf
@@ -32,13 +32,13 @@ BT
 1 0 0 1 54 498 Tm (This document explains the code as it exists today. It focuses on the working runtime path,) Tj
 1 0 0 1 54 483 Tm (not the full future product vision. The current codebase is an audio ingestion, diagnostics,) Tj
 1 0 0 1 54 468 Tm (and deterministic feature extraction pipeline with an ONNX-backed extractor path plus) Tj
-1 0 0 1 54 453 Tm (prepared reference profile loading and baseline nearest-neighbor matching. It does not yet) Tj
-1 0 0 1 54 438 Tm (perform slide resolution or OSC output.) Tj
+1 0 0 1 54 453 Tm (prepared reference profile loading, baseline nearest-neighbor matching, and a simple) Tj
+1 0 0 1 54 438 Tm (stabilization layer. It does not yet perform slide resolution or OSC output.) Tj
 1 0 0 1 54 423 Tm (Current truth: the code already captures or simulates audio, pushes chunks through a bounded) Tj
 1 0 0 1 54 408 Tm (queue, computes basic signal diagnostics, extracts feature frames through either a) Tj
 1 0 0 1 54 393 Tm (deterministic or ONNX-backed extractor, loads a prepared reference profile, runs a baseline) Tj
-1 0 0 1 54 378 Tm (nearest-neighbor match, and logs metrics. The more advanced ?lyrics alignment? parts are) Tj
-1 0 0 1 54 363 Tm (still planned, not runtime behavior yet.) Tj
+1 0 0 1 54 378 Tm (nearest-neighbor match, applies simple stabilization rules, and logs metrics. The more) Tj
+1 0 0 1 54 363 Tm (advanced ?lyrics alignment? parts are still planned, not runtime behavior yet.) Tj
 1 0 0 1 54 348 Tm () Tj
 1 0 0 1 54 333 Tm (1. Fast Summary) Tj
 1 0 0 1 54 318 Tm () Tj
@@ -65,7 +65,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 6 0 R >>
 endobj
 6 0 obj
-<< /Length 1962 >>
+<< /Length 1986 >>
 stream
 BT
 /F1 11 Tf
@@ -90,30 +90,30 @@ BT
 1 0 0 1 54 468 Tm (  baseline nearest-neighbor match against reference frames) Tj
 1 0 0 1 54 453 Tm (        |) Tj
 1 0 0 1 54 438 Tm (        v) Tj
-1 0 0 1 54 423 Tm (  RuntimeMetrics + log output + RuntimeReport) Tj
-1 0 0 1 54 408 Tm () Tj
-1 0 0 1 54 393 Tm (2. Read Order) Tj
-1 0 0 1 54 378 Tm () Tj
-1 0 0 1 54 363 Tm (src/lyrics_aligner/main.py) Tj
-1 0 0 1 54 348 Tm () Tj
-1 0 0 1 54 333 Tm (src/lyrics_aligner/config.py) Tj
-1 0 0 1 54 318 Tm () Tj
-1 0 0 1 54 303 Tm (src/lyrics_aligner/ports/audio_source.py) Tj
-1 0 0 1 54 288 Tm () Tj
-1 0 0 1 54 273 Tm (src/lyrics_aligner/domain/models.py) Tj
-1 0 0 1 54 258 Tm () Tj
-1 0 0 1 54 243 Tm (src/lyrics_aligner/application/runtime.py) Tj
-1 0 0 1 54 228 Tm () Tj
-1 0 0 1 54 213 Tm (src/lyrics_aligner/application/metrics.py) Tj
-1 0 0 1 54 198 Tm () Tj
-1 0 0 1 54 183 Tm (src/lyrics_aligner/adapters/audio/simulated.py) Tj
-1 0 0 1 54 168 Tm () Tj
-1 0 0 1 54 153 Tm (src/lyrics_aligner/adapters/audio/microphone.py) Tj
-1 0 0 1 54 138 Tm () Tj
-1 0 0 1 54 123 Tm (src/lyrics_aligner/adapters/features/simulated.py) Tj
-1 0 0 1 54 108 Tm () Tj
-1 0 0 1 54 93 Tm (src/lyrics_aligner/adapters/features/onnx_runtime.py) Tj
-1 0 0 1 54 78 Tm () Tj
+1 0 0 1 54 423 Tm (  simple stabilization of backward and large forward jumps) Tj
+1 0 0 1 54 408 Tm (        |) Tj
+1 0 0 1 54 393 Tm (        v) Tj
+1 0 0 1 54 378 Tm (  RuntimeMetrics + log output + RuntimeReport) Tj
+1 0 0 1 54 363 Tm () Tj
+1 0 0 1 54 348 Tm (2. Read Order) Tj
+1 0 0 1 54 333 Tm () Tj
+1 0 0 1 54 318 Tm (src/lyrics_aligner/main.py) Tj
+1 0 0 1 54 303 Tm () Tj
+1 0 0 1 54 288 Tm (src/lyrics_aligner/config.py) Tj
+1 0 0 1 54 273 Tm () Tj
+1 0 0 1 54 258 Tm (src/lyrics_aligner/ports/audio_source.py) Tj
+1 0 0 1 54 243 Tm () Tj
+1 0 0 1 54 228 Tm (src/lyrics_aligner/domain/models.py) Tj
+1 0 0 1 54 213 Tm () Tj
+1 0 0 1 54 198 Tm (src/lyrics_aligner/application/runtime.py) Tj
+1 0 0 1 54 183 Tm () Tj
+1 0 0 1 54 168 Tm (src/lyrics_aligner/application/metrics.py) Tj
+1 0 0 1 54 153 Tm () Tj
+1 0 0 1 54 138 Tm (src/lyrics_aligner/adapters/audio/simulated.py) Tj
+1 0 0 1 54 123 Tm () Tj
+1 0 0 1 54 108 Tm (src/lyrics_aligner/adapters/audio/microphone.py) Tj
+1 0 0 1 54 93 Tm () Tj
+1 0 0 1 54 78 Tm (src/lyrics_aligner/adapters/features/simulated.py) Tj
 ET
 endstream
 endobj
@@ -121,55 +121,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 8 0 R >>
 endobj
 8 0 obj
-<< /Length 2540 >>
+<< /Length 2487 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm (src/lyrics_aligner/adapters/reference_profiles/filesystem.py) Tj
-1 0 0 1 54 723 Tm () Tj
-1 0 0 1 54 708 Tm (src/lyrics_aligner/adapters/matching/nearest_neighbor.py) Tj
-1 0 0 1 54 693 Tm () Tj
-1 0 0 1 54 678 Tm (3. Package-Level Mental Model) Tj
-1 0 0 1 54 663 Tm () Tj
-1 0 0 1 54 648 Tm (domain) Tj
-1 0 0 1 54 633 Tm (Pure data structures and future business concepts. Today the active domain types include) Tj
-1 0 0 1 54 618 Tm (AudioChunk , FeatureFrame , ReferenceProfile , and MatchResult .) Tj
-1 0 0 1 54 603 Tm () Tj
-1 0 0 1 54 588 Tm (ports) Tj
-1 0 0 1 54 573 Tm (Abstract contracts. The runtime depends on ports like AudioSource , FeatureExtractor , and) Tj
-1 0 0 1 54 558 Tm (ReferenceProfileRepository , and FeatureMatcher , not on concrete adapters.) Tj
-1 0 0 1 54 543 Tm () Tj
-1 0 0 1 54 528 Tm (adapters) Tj
-1 0 0 1 54 513 Tm (Concrete implementations. Right now there are simulated and microphone audio adapters plus) Tj
-1 0 0 1 54 498 Tm (deterministic and ONNX-backed feature extractor adapters, a filesystem-backed reference) Tj
-1 0 0 1 54 483 Tm (profile adapter, and a nearest-neighbor matcher adapter.) Tj
+1 0 0 1 54 738 Tm () Tj
+1 0 0 1 54 723 Tm (src/lyrics_aligner/adapters/features/onnx_runtime.py) Tj
+1 0 0 1 54 708 Tm () Tj
+1 0 0 1 54 693 Tm (src/lyrics_aligner/adapters/reference_profiles/filesystem.py) Tj
+1 0 0 1 54 678 Tm () Tj
+1 0 0 1 54 663 Tm (src/lyrics_aligner/adapters/matching/nearest_neighbor.py) Tj
+1 0 0 1 54 648 Tm () Tj
+1 0 0 1 54 633 Tm (src/lyrics_aligner/adapters/matching/stabilized.py) Tj
+1 0 0 1 54 618 Tm () Tj
+1 0 0 1 54 603 Tm (3. Package-Level Mental Model) Tj
+1 0 0 1 54 588 Tm () Tj
+1 0 0 1 54 573 Tm (domain) Tj
+1 0 0 1 54 558 Tm (Pure data structures and future business concepts. Today the active domain types include) Tj
+1 0 0 1 54 543 Tm (AudioChunk , FeatureFrame , ReferenceProfile , and MatchResult .) Tj
+1 0 0 1 54 528 Tm () Tj
+1 0 0 1 54 513 Tm (ports) Tj
+1 0 0 1 54 498 Tm (Abstract contracts. The runtime depends on ports like AudioSource , FeatureExtractor , and) Tj
+1 0 0 1 54 483 Tm (ReferenceProfileRepository , and FeatureMatcher , not on concrete adapters.) Tj
 1 0 0 1 54 468 Tm () Tj
-1 0 0 1 54 453 Tm (application) Tj
-1 0 0 1 54 438 Tm (Orchestration and lifecycle. This is where threading, queueing, metrics, and logging live.) Tj
-1 0 0 1 54 423 Tm () Tj
-1 0 0 1 54 408 Tm (4. Entry Point: What main.py Actually Does) Tj
-1 0 0 1 54 393 Tm (main.py is intentionally thin. It does not contain signal-processing logic. It acts as a) Tj
-1 0 0 1 54 378 Tm (bootstrapping layer.) Tj
-1 0 0 1 54 363 Tm (Main responsibilities:) Tj
+1 0 0 1 54 453 Tm (adapters) Tj
+1 0 0 1 54 438 Tm (Concrete implementations. Right now there are simulated and microphone audio adapters plus) Tj
+1 0 0 1 54 423 Tm (deterministic and ONNX-backed feature extractor adapters, a filesystem-backed reference) Tj
+1 0 0 1 54 408 Tm (profile adapter, and a nearest-neighbor matcher adapter plus a stabilizing wrapper.) Tj
+1 0 0 1 54 393 Tm () Tj
+1 0 0 1 54 378 Tm (application) Tj
+1 0 0 1 54 363 Tm (Orchestration and lifecycle. This is where threading, queueing, metrics, and logging live.) Tj
 1 0 0 1 54 348 Tm () Tj
-1 0 0 1 54 333 Tm (parse CLI arguments) Tj
-1 0 0 1 54 318 Tm () Tj
-1 0 0 1 54 303 Tm (load environment-driven configuration) Tj
-1 0 0 1 54 288 Tm () Tj
-1 0 0 1 54 273 Tm (construct the selected audio source) Tj
-1 0 0 1 54 258 Tm () Tj
-1 0 0 1 54 243 Tm (construct the selected feature extractor) Tj
-1 0 0 1 54 228 Tm () Tj
-1 0 0 1 54 213 Tm (optionally load the selected reference profile directory) Tj
-1 0 0 1 54 198 Tm () Tj
-1 0 0 1 54 183 Tm (optionally construct the matcher for the loaded profile) Tj
-1 0 0 1 54 168 Tm () Tj
-1 0 0 1 54 153 Tm (construct the runtime) Tj
-1 0 0 1 54 138 Tm () Tj
-1 0 0 1 54 123 Tm (run the runtime and log the final summary) Tj
-1 0 0 1 54 108 Tm () Tj
-1 0 0 1 54 93 Tm (The most important helper in the file is _build_audio_source\(config\) . That function decides) Tj
-1 0 0 1 54 78 Tm (whether the program runs in simulated mode or microphone mode.) Tj
+1 0 0 1 54 333 Tm (4. Entry Point: What main.py Actually Does) Tj
+1 0 0 1 54 318 Tm (main.py is intentionally thin. It does not contain signal-processing logic. It acts as a) Tj
+1 0 0 1 54 303 Tm (bootstrapping layer.) Tj
+1 0 0 1 54 288 Tm (Main responsibilities:) Tj
+1 0 0 1 54 273 Tm () Tj
+1 0 0 1 54 258 Tm (parse CLI arguments) Tj
+1 0 0 1 54 243 Tm () Tj
+1 0 0 1 54 228 Tm (load environment-driven configuration) Tj
+1 0 0 1 54 213 Tm () Tj
+1 0 0 1 54 198 Tm (construct the selected audio source) Tj
+1 0 0 1 54 183 Tm () Tj
+1 0 0 1 54 168 Tm (construct the selected feature extractor) Tj
+1 0 0 1 54 153 Tm () Tj
+1 0 0 1 54 138 Tm (optionally load the selected reference profile directory) Tj
+1 0 0 1 54 123 Tm () Tj
+1 0 0 1 54 108 Tm (optionally construct the matcher and stabilizer for the loaded profile) Tj
+1 0 0 1 54 93 Tm () Tj
+1 0 0 1 54 78 Tm (construct the runtime) Tj
 ET
 endstream
 endobj
@@ -177,55 +177,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 10 0 R >>
 endobj
 10 0 obj
-<< /Length 2357 >>
+<< /Length 2478 >>
 stream
 BT
 /F1 11 Tf
 1 0 0 1 54 738 Tm () Tj
-1 0 0 1 54 723 Tm (Startup Sequence) Tj
+1 0 0 1 54 723 Tm (run the runtime and log the final summary) Tj
 1 0 0 1 54 708 Tm () Tj
-1 0 0 1 54 693 Tm (_parse_args\(\) reads CLI flags.) Tj
-1 0 0 1 54 678 Tm () Tj
-1 0 0 1 54 663 Tm (_config_from_args\(\) merges CLI args with env-based defaults.) Tj
-1 0 0 1 54 648 Tm () Tj
-1 0 0 1 54 633 Tm (If configured, the reference profile repository loads prepared profile artifacts from disk.) Tj
-1 0 0 1 54 618 Tm () Tj
-1 0 0 1 54 603 Tm (_build_audio_source\(\) returns an AudioSource .) Tj
-1 0 0 1 54 588 Tm () Tj
-1 0 0 1 54 573 Tm (_build_feature_extractor\(\) returns a FeatureExtractor .) Tj
-1 0 0 1 54 558 Tm () Tj
-1 0 0 1 54 543 Tm (_build_feature_matcher\(\) returns a baseline matcher when a reference profile is present.) Tj
-1 0 0 1 54 528 Tm () Tj
-1 0 0 1 54 513 Tm (AudioIngestionRuntime\(...\) is created.) Tj
-1 0 0 1 54 498 Tm () Tj
-1 0 0 1 54 483 Tm (runtime.run\(\) starts producer/consumer processing.) Tj
-1 0 0 1 54 468 Tm () Tj
-1 0 0 1 54 453 Tm (A final summary log line is emitted from the returned report.) Tj
+1 0 0 1 54 693 Tm (The most important helper in the file is _build_audio_source\(config\) . That function decides) Tj
+1 0 0 1 54 678 Tm (whether the program runs in simulated mode or microphone mode.) Tj
+1 0 0 1 54 663 Tm () Tj
+1 0 0 1 54 648 Tm (Startup Sequence) Tj
+1 0 0 1 54 633 Tm () Tj
+1 0 0 1 54 618 Tm (_parse_args\(\) reads CLI flags.) Tj
+1 0 0 1 54 603 Tm () Tj
+1 0 0 1 54 588 Tm (_config_from_args\(\) merges CLI args with env-based defaults.) Tj
+1 0 0 1 54 573 Tm () Tj
+1 0 0 1 54 558 Tm (If configured, the reference profile repository loads prepared profile artifacts from disk.) Tj
+1 0 0 1 54 543 Tm () Tj
+1 0 0 1 54 528 Tm (_build_audio_source\(\) returns an AudioSource .) Tj
+1 0 0 1 54 513 Tm () Tj
+1 0 0 1 54 498 Tm (_build_feature_extractor\(\) returns a FeatureExtractor .) Tj
+1 0 0 1 54 483 Tm () Tj
+1 0 0 1 54 468 Tm (_build_feature_matcher\(\) returns a baseline matcher wrapped in a simple stabilizer when a) Tj
+1 0 0 1 54 453 Tm (  reference profile is present.) Tj
 1 0 0 1 54 438 Tm () Tj
-1 0 0 1 54 423 Tm (5. Configuration Flow) Tj
-1 0 0 1 54 408 Tm (Configuration is centralized in src/lyrics_aligner/config.py .) Tj
-1 0 0 1 54 393 Tm () Tj
-1 0 0 1 54 378 Tm (Why AppConfig Exists) Tj
-1 0 0 1 54 363 Tm (The code does not scatter constants everywhere. Instead, it keeps runtime choices in one) Tj
-1 0 0 1 54 348 Tm (dataclass. That makes the boot path deterministic and easy to extend later.) Tj
-1 0 0 1 54 333 Tm () Tj
-1 0 0 1 54 318 Tm (Important Fields) Tj
+1 0 0 1 54 423 Tm (AudioIngestionRuntime\(...\) is created.) Tj
+1 0 0 1 54 408 Tm () Tj
+1 0 0 1 54 393 Tm (runtime.run\(\) starts producer/consumer processing.) Tj
+1 0 0 1 54 378 Tm () Tj
+1 0 0 1 54 363 Tm (A final summary log line is emitted from the returned report.) Tj
+1 0 0 1 54 348 Tm () Tj
+1 0 0 1 54 333 Tm (5. Configuration Flow) Tj
+1 0 0 1 54 318 Tm (Configuration is centralized in src/lyrics_aligner/config.py .) Tj
 1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (audio_source : selects simulated or microphone) Tj
-1 0 0 1 54 273 Tm () Tj
-1 0 0 1 54 258 Tm (feature_extractor : selects simulated or onnx) Tj
+1 0 0 1 54 288 Tm (Why AppConfig Exists) Tj
+1 0 0 1 54 273 Tm (The code does not scatter constants everywhere. Instead, it keeps runtime choices in one) Tj
+1 0 0 1 54 258 Tm (dataclass. That makes the boot path deterministic and easy to extend later.) Tj
 1 0 0 1 54 243 Tm () Tj
-1 0 0 1 54 228 Tm (reference_profile_path : directory containing prepared reference features and metadata) Tj
+1 0 0 1 54 228 Tm (Important Fields) Tj
 1 0 0 1 54 213 Tm () Tj
-1 0 0 1 54 198 Tm (match_confidence_threshold : minimum confidence required to accept a match) Tj
+1 0 0 1 54 198 Tm (audio_source : selects simulated or microphone) Tj
 1 0 0 1 54 183 Tm () Tj
-1 0 0 1 54 168 Tm (sample_rate : audio sampling frequency) Tj
+1 0 0 1 54 168 Tm (feature_extractor : selects simulated or onnx) Tj
 1 0 0 1 54 153 Tm () Tj
-1 0 0 1 54 138 Tm (channels : currently expected to be mono for the main path) Tj
+1 0 0 1 54 138 Tm (reference_profile_path : directory containing prepared reference features and metadata) Tj
 1 0 0 1 54 123 Tm () Tj
-1 0 0 1 54 108 Tm (block_size : samples per chunk) Tj
+1 0 0 1 54 108 Tm (match_confidence_threshold : minimum confidence required to accept a match) Tj
 1 0 0 1 54 93 Tm () Tj
-1 0 0 1 54 78 Tm (audio_queue_capacity : bounded queue size in the runtime) Tj
+1 0 0 1 54 78 Tm (match_max_forward_jump_frames : largest forward jump the stabilizer allows) Tj
 ET
 endstream
 endobj
@@ -233,55 +233,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 12 0 R >>
 endobj
 12 0 obj
-<< /Length 2442 >>
+<< /Length 2323 >>
 stream
 BT
 /F1 11 Tf
 1 0 0 1 54 738 Tm () Tj
-1 0 0 1 54 723 Tm (input_device : microphone device name or index) Tj
+1 0 0 1 54 723 Tm (match_large_jump_threshold_frames : jump size that starts requiring repeated confirmation) Tj
 1 0 0 1 54 708 Tm () Tj
-1 0 0 1 54 693 Tm (feature_model_path : ONNX model path when ONNX extraction is selected) Tj
+1 0 0 1 54 693 Tm (match_confirmation_count : repeated matches required before accepting a large jump) Tj
 1 0 0 1 54 678 Tm () Tj
-1 0 0 1 54 663 Tm (simulation_duration_seconds : simulated stream length) Tj
+1 0 0 1 54 663 Tm (sample_rate : audio sampling frequency) Tj
 1 0 0 1 54 648 Tm () Tj
-1 0 0 1 54 633 Tm (diagnostics_interval_seconds : log cadence) Tj
+1 0 0 1 54 633 Tm (channels : currently expected to be mono for the main path) Tj
 1 0 0 1 54 618 Tm () Tj
-1 0 0 1 54 603 Tm (silence_threshold_rms : threshold for silent chunk counting) Tj
+1 0 0 1 54 603 Tm (block_size : samples per chunk) Tj
 1 0 0 1 54 588 Tm () Tj
-1 0 0 1 54 573 Tm (clipping_threshold_peak : threshold for clipped chunk counting) Tj
+1 0 0 1 54 573 Tm (audio_queue_capacity : bounded queue size in the runtime) Tj
 1 0 0 1 54 558 Tm () Tj
-1 0 0 1 54 543 Tm (Env Var Precedence) Tj
-1 0 0 1 54 528 Tm (AppConfig.from_env\(\) reads LYRICS_ALIGNER_* variables. Then _config_from_args\(\) lets CLI) Tj
-1 0 0 1 54 513 Tm (flags override some of those values. That means the effective precedence is:) Tj
+1 0 0 1 54 543 Tm (input_device : microphone device name or index) Tj
+1 0 0 1 54 528 Tm () Tj
+1 0 0 1 54 513 Tm (feature_model_path : ONNX model path when ONNX extraction is selected) Tj
 1 0 0 1 54 498 Tm () Tj
-1 0 0 1 54 483 Tm (hardcoded defaults) Tj
-1 0 0 1 54 468 Tm (    -> environment variables) Tj
-1 0 0 1 54 453 Tm (    -> CLI arguments) Tj
+1 0 0 1 54 483 Tm (simulation_duration_seconds : simulated stream length) Tj
+1 0 0 1 54 468 Tm () Tj
+1 0 0 1 54 453 Tm (diagnostics_interval_seconds : log cadence) Tj
 1 0 0 1 54 438 Tm () Tj
-1 0 0 1 54 423 Tm (Important extractor-related environment variables now include:) Tj
+1 0 0 1 54 423 Tm (silence_threshold_rms : threshold for silent chunk counting) Tj
 1 0 0 1 54 408 Tm () Tj
-1 0 0 1 54 393 Tm (LYRICS_ALIGNER_FEATURE_EXTRACTOR) Tj
+1 0 0 1 54 393 Tm (clipping_threshold_peak : threshold for clipped chunk counting) Tj
 1 0 0 1 54 378 Tm () Tj
-1 0 0 1 54 363 Tm (LYRICS_ALIGNER_FEATURE_MODEL_PATH) Tj
-1 0 0 1 54 348 Tm () Tj
-1 0 0 1 54 333 Tm (6. The Port Abstraction) Tj
-1 0 0 1 54 318 Tm (The key interface is src/lyrics_aligner/ports/audio_source.py .) Tj
-1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (class AudioSource\(Protocol\):) Tj
-1 0 0 1 54 273 Tm (    def chunks\(self\) -> Iterator[AudioChunk]: ...) Tj
+1 0 0 1 54 363 Tm (Env Var Precedence) Tj
+1 0 0 1 54 348 Tm (AppConfig.from_env\(\) reads LYRICS_ALIGNER_* variables. Then _config_from_args\(\) lets CLI) Tj
+1 0 0 1 54 333 Tm (flags override some of those values. That means the effective precedence is:) Tj
+1 0 0 1 54 318 Tm () Tj
+1 0 0 1 54 303 Tm (hardcoded defaults) Tj
+1 0 0 1 54 288 Tm (    -> environment variables) Tj
+1 0 0 1 54 273 Tm (    -> CLI arguments) Tj
 1 0 0 1 54 258 Tm () Tj
-1 0 0 1 54 243 Tm (That single interface is what keeps the runtime generic. The application layer only knows ?I) Tj
-1 0 0 1 54 228 Tm (can iterate audio chunks.? It does not know whether those chunks came from NumPy synthesis,) Tj
-1 0 0 1 54 213 Tm (a microphone callback, a WAV file, or some future network source.) Tj
+1 0 0 1 54 243 Tm (Important extractor-related environment variables now include:) Tj
+1 0 0 1 54 228 Tm () Tj
+1 0 0 1 54 213 Tm (LYRICS_ALIGNER_FEATURE_EXTRACTOR) Tj
 1 0 0 1 54 198 Tm () Tj
-1 0 0 1 54 183 Tm (7. Core Domain Model: AudioChunk) Tj
-1 0 0 1 54 168 Tm (The main active domain model is src/lyrics_aligner/domain/models.py .) Tj
-1 0 0 1 54 153 Tm () Tj
-1 0 0 1 54 138 Tm (@dataclass\(frozen=True, slots=True\)) Tj
-1 0 0 1 54 123 Tm (class AudioChunk:) Tj
-1 0 0 1 54 108 Tm (    samples: FloatArray) Tj
-1 0 0 1 54 93 Tm (    captured_at: float) Tj
-1 0 0 1 54 78 Tm (    sequence_number: int) Tj
+1 0 0 1 54 183 Tm (LYRICS_ALIGNER_FEATURE_MODEL_PATH) Tj
+1 0 0 1 54 168 Tm () Tj
+1 0 0 1 54 153 Tm (6. The Port Abstraction) Tj
+1 0 0 1 54 138 Tm (The key interface is src/lyrics_aligner/ports/audio_source.py .) Tj
+1 0 0 1 54 123 Tm () Tj
+1 0 0 1 54 108 Tm (class AudioSource\(Protocol\):) Tj
+1 0 0 1 54 93 Tm (    def chunks\(self\) -> Iterator[AudioChunk]: ...) Tj
+1 0 0 1 54 78 Tm () Tj
 ET
 endstream
 endobj
@@ -289,55 +289,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 14 0 R >>
 endobj
 14 0 obj
-<< /Length 2214 >>
+<< /Length 2357 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm () Tj
-1 0 0 1 54 723 Tm (Each field matters:) Tj
-1 0 0 1 54 708 Tm () Tj
-1 0 0 1 54 693 Tm (samples : the raw waveform for that time slice) Tj
-1 0 0 1 54 678 Tm () Tj
-1 0 0 1 54 663 Tm (captured_at : when the chunk was considered captured) Tj
+1 0 0 1 54 738 Tm (That single interface is what keeps the runtime generic. The application layer only knows ?I) Tj
+1 0 0 1 54 723 Tm (can iterate audio chunks.? It does not know whether those chunks came from NumPy synthesis,) Tj
+1 0 0 1 54 708 Tm (a microphone callback, a WAV file, or some future network source.) Tj
+1 0 0 1 54 693 Tm () Tj
+1 0 0 1 54 678 Tm (7. Core Domain Model: AudioChunk) Tj
+1 0 0 1 54 663 Tm (The main active domain model is src/lyrics_aligner/domain/models.py .) Tj
 1 0 0 1 54 648 Tm () Tj
-1 0 0 1 54 633 Tm (sequence_number : monotonic chunk ordering) Tj
-1 0 0 1 54 618 Tm () Tj
-1 0 0 1 54 603 Tm (Most of the runtime is effectively ?move AudioChunk safely from source to processor.?) Tj
-1 0 0 1 54 588 Tm () Tj
-1 0 0 1 54 573 Tm (8. Simulated Audio Adapter) Tj
-1 0 0 1 54 558 Tm (adapters/audio/simulated.py is the easier adapter to understand because it does not involve) Tj
-1 0 0 1 54 543 Tm (callback APIs.) Tj
+1 0 0 1 54 633 Tm (@dataclass\(frozen=True, slots=True\)) Tj
+1 0 0 1 54 618 Tm (class AudioChunk:) Tj
+1 0 0 1 54 603 Tm (    samples: FloatArray) Tj
+1 0 0 1 54 588 Tm (    captured_at: float) Tj
+1 0 0 1 54 573 Tm (    sequence_number: int) Tj
+1 0 0 1 54 558 Tm () Tj
+1 0 0 1 54 543 Tm (Each field matters:) Tj
 1 0 0 1 54 528 Tm () Tj
-1 0 0 1 54 513 Tm (What It Does) Tj
+1 0 0 1 54 513 Tm (samples : the raw waveform for that time slice) Tj
 1 0 0 1 54 498 Tm () Tj
-1 0 0 1 54 483 Tm (validates a sine-wave configuration) Tj
+1 0 0 1 54 483 Tm (captured_at : when the chunk was considered captured) Tj
 1 0 0 1 54 468 Tm () Tj
-1 0 0 1 54 453 Tm (computes chunks of waveform samples) Tj
+1 0 0 1 54 453 Tm (sequence_number : monotonic chunk ordering) Tj
 1 0 0 1 54 438 Tm () Tj
-1 0 0 1 54 423 Tm (paces delivery in real time) Tj
+1 0 0 1 54 423 Tm (Most of the runtime is effectively ?move AudioChunk safely from source to processor.?) Tj
 1 0 0 1 54 408 Tm () Tj
-1 0 0 1 54 393 Tm (yields AudioChunk objects) Tj
-1 0 0 1 54 378 Tm () Tj
-1 0 0 1 54 363 Tm (Why It Matters) Tj
-1 0 0 1 54 348 Tm (It lets the rest of the pipeline be tested without touching real audio hardware. This is) Tj
-1 0 0 1 54 333 Tm (important because queue behavior, shutdown behavior, and metrics logic can all be built) Tj
-1 0 0 1 54 318 Tm (before device integration is stable.) Tj
-1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (Key Details) Tj
-1 0 0 1 54 273 Tm () Tj
-1 0 0 1 54 258 Tm (duration * sample_rate determines total samples) Tj
-1 0 0 1 54 243 Tm () Tj
-1 0 0 1 54 228 Tm (the loop walks those samples in block_size increments) Tj
-1 0 0 1 54 213 Tm () Tj
-1 0 0 1 54 198 Tm (each block computes a deterministic sine wave) Tj
-1 0 0 1 54 183 Tm () Tj
-1 0 0 1 54 168 Tm (the adapter waits until the scheduled capture time before yielding) Tj
-1 0 0 1 54 153 Tm () Tj
-1 0 0 1 54 138 Tm (stop\(\) interrupts the wait via a threading event) Tj
+1 0 0 1 54 393 Tm (8. Simulated Audio Adapter) Tj
+1 0 0 1 54 378 Tm (adapters/audio/simulated.py is the easier adapter to understand because it does not involve) Tj
+1 0 0 1 54 363 Tm (callback APIs.) Tj
+1 0 0 1 54 348 Tm () Tj
+1 0 0 1 54 333 Tm (What It Does) Tj
+1 0 0 1 54 318 Tm () Tj
+1 0 0 1 54 303 Tm (validates a sine-wave configuration) Tj
+1 0 0 1 54 288 Tm () Tj
+1 0 0 1 54 273 Tm (computes chunks of waveform samples) Tj
+1 0 0 1 54 258 Tm () Tj
+1 0 0 1 54 243 Tm (paces delivery in real time) Tj
+1 0 0 1 54 228 Tm () Tj
+1 0 0 1 54 213 Tm (yields AudioChunk objects) Tj
+1 0 0 1 54 198 Tm () Tj
+1 0 0 1 54 183 Tm (Why It Matters) Tj
+1 0 0 1 54 168 Tm (It lets the rest of the pipeline be tested without touching real audio hardware. This is) Tj
+1 0 0 1 54 153 Tm (important because queue behavior, shutdown behavior, and metrics logic can all be built) Tj
+1 0 0 1 54 138 Tm (before device integration is stable.) Tj
 1 0 0 1 54 123 Tm () Tj
-1 0 0 1 54 108 Tm (9. Microphone Audio Adapter) Tj
-1 0 0 1 54 93 Tm (adapters/audio/microphone.py is more subtle because real audio APIs are callback-driven.) Tj
-1 0 0 1 54 78 Tm () Tj
+1 0 0 1 54 108 Tm (Key Details) Tj
+1 0 0 1 54 93 Tm () Tj
+1 0 0 1 54 78 Tm (duration * sample_rate determines total samples) Tj
 ET
 endstream
 endobj
@@ -345,55 +345,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 16 0 R >>
 endobj
 16 0 obj
-<< /Length 2222 >>
+<< /Length 2250 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm (What It Does) Tj
-1 0 0 1 54 723 Tm () Tj
-1 0 0 1 54 708 Tm (opens a sounddevice.InputStream) Tj
-1 0 0 1 54 693 Tm () Tj
-1 0 0 1 54 678 Tm (receives audio frames inside a callback) Tj
-1 0 0 1 54 663 Tm () Tj
-1 0 0 1 54 648 Tm (converts those frames to mono float32) Tj
-1 0 0 1 54 633 Tm () Tj
-1 0 0 1 54 618 Tm (packages them into AudioChunk) Tj
-1 0 0 1 54 603 Tm () Tj
-1 0 0 1 54 588 Tm (pushes them into an internal queue) Tj
+1 0 0 1 54 738 Tm () Tj
+1 0 0 1 54 723 Tm (the loop walks those samples in block_size increments) Tj
+1 0 0 1 54 708 Tm () Tj
+1 0 0 1 54 693 Tm (each block computes a deterministic sine wave) Tj
+1 0 0 1 54 678 Tm () Tj
+1 0 0 1 54 663 Tm (the adapter waits until the scheduled capture time before yielding) Tj
+1 0 0 1 54 648 Tm () Tj
+1 0 0 1 54 633 Tm (stop\(\) interrupts the wait via a threading event) Tj
+1 0 0 1 54 618 Tm () Tj
+1 0 0 1 54 603 Tm (9. Microphone Audio Adapter) Tj
+1 0 0 1 54 588 Tm (adapters/audio/microphone.py is more subtle because real audio APIs are callback-driven.) Tj
 1 0 0 1 54 573 Tm () Tj
-1 0 0 1 54 558 Tm (yields them to the runtime from chunks\(\)) Tj
+1 0 0 1 54 558 Tm (What It Does) Tj
 1 0 0 1 54 543 Tm () Tj
-1 0 0 1 54 528 Tm (Why There Is an Internal Queue) Tj
-1 0 0 1 54 513 Tm (The audio callback should stay fast. Doing heavier work inside that callback is risky) Tj
-1 0 0 1 54 498 Tm (because callback stalls can cause audio dropouts or timing issues. So the callback only does) Tj
-1 0 0 1 54 483 Tm (the minimum:) Tj
-1 0 0 1 54 468 Tm () Tj
-1 0 0 1 54 453 Tm (receive input samples) Tj
-1 0 0 1 54 438 Tm () Tj
-1 0 0 1 54 423 Tm (convert shape and dtype) Tj
-1 0 0 1 54 408 Tm () Tj
-1 0 0 1 54 393 Tm (wrap them in AudioChunk) Tj
-1 0 0 1 54 378 Tm () Tj
-1 0 0 1 54 363 Tm (put them into a queue) Tj
-1 0 0 1 54 348 Tm () Tj
-1 0 0 1 54 333 Tm (Then the outer iterator yields from that queue at normal Python speed.) Tj
-1 0 0 1 54 318 Tm () Tj
-1 0 0 1 54 303 Tm (Important Distinction) Tj
-1 0 0 1 54 288 Tm (The microphone adapter has its own small internal queue, but the main backpressure policy) Tj
-1 0 0 1 54 273 Tm (for the application still lives in the runtime?s bounded queue. So there are two queue) Tj
-1 0 0 1 54 258 Tm (layers with different purposes:) Tj
-1 0 0 1 54 243 Tm () Tj
-1 0 0 1 54 228 Tm (adapter queue: callback-safe handoff) Tj
-1 0 0 1 54 213 Tm () Tj
-1 0 0 1 54 198 Tm (runtime queue: application-level backpressure and drop policy) Tj
-1 0 0 1 54 183 Tm () Tj
-1 0 0 1 54 168 Tm (10. Runtime: The Actual Working Pipeline) Tj
-1 0 0 1 54 153 Tm (application/runtime.py is the operational center of the codebase.) Tj
+1 0 0 1 54 528 Tm (opens a sounddevice.InputStream) Tj
+1 0 0 1 54 513 Tm () Tj
+1 0 0 1 54 498 Tm (receives audio frames inside a callback) Tj
+1 0 0 1 54 483 Tm () Tj
+1 0 0 1 54 468 Tm (converts those frames to mono float32) Tj
+1 0 0 1 54 453 Tm () Tj
+1 0 0 1 54 438 Tm (packages them into AudioChunk) Tj
+1 0 0 1 54 423 Tm () Tj
+1 0 0 1 54 408 Tm (pushes them into an internal queue) Tj
+1 0 0 1 54 393 Tm () Tj
+1 0 0 1 54 378 Tm (yields them to the runtime from chunks\(\)) Tj
+1 0 0 1 54 363 Tm () Tj
+1 0 0 1 54 348 Tm (Why There Is an Internal Queue) Tj
+1 0 0 1 54 333 Tm (The audio callback should stay fast. Doing heavier work inside that callback is risky) Tj
+1 0 0 1 54 318 Tm (because callback stalls can cause audio dropouts or timing issues. So the callback only does) Tj
+1 0 0 1 54 303 Tm (the minimum:) Tj
+1 0 0 1 54 288 Tm () Tj
+1 0 0 1 54 273 Tm (receive input samples) Tj
+1 0 0 1 54 258 Tm () Tj
+1 0 0 1 54 243 Tm (convert shape and dtype) Tj
+1 0 0 1 54 228 Tm () Tj
+1 0 0 1 54 213 Tm (wrap them in AudioChunk) Tj
+1 0 0 1 54 198 Tm () Tj
+1 0 0 1 54 183 Tm (put them into a queue) Tj
+1 0 0 1 54 168 Tm () Tj
+1 0 0 1 54 153 Tm (Then the outer iterator yields from that queue at normal Python speed.) Tj
 1 0 0 1 54 138 Tm () Tj
-1 0 0 1 54 123 Tm (Two Logical Sides) Tj
-1 0 0 1 54 108 Tm () Tj
-1 0 0 1 54 93 Tm (Producer Side) Tj
-1 0 0 1 54 78 Tm (Reads chunks from the source and inserts them into the bounded queue.) Tj
+1 0 0 1 54 123 Tm (Important Distinction) Tj
+1 0 0 1 54 108 Tm (The microphone adapter has its own small internal queue, but the main backpressure policy) Tj
+1 0 0 1 54 93 Tm (for the application still lives in the runtime?s bounded queue. So there are two queue) Tj
+1 0 0 1 54 78 Tm (layers with different purposes:) Tj
 ET
 endstream
 endobj
@@ -401,55 +401,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 18 0 R >>
 endobj
 18 0 obj
-<< /Length 2362 >>
+<< /Length 2174 >>
 stream
 BT
 /F1 11 Tf
 1 0 0 1 54 738 Tm () Tj
-1 0 0 1 54 723 Tm (Consumer Side) Tj
-1 0 0 1 54 708 Tm (Pulls chunks from the bounded queue, processes them, and logs metrics.) Tj
-1 0 0 1 54 693 Tm () Tj
-1 0 0 1 54 678 Tm (run\(\)) Tj
-1 0 0 1 54 663 Tm (run\(\) creates a producer thread and then immediately starts the consumer loop on the main) Tj
-1 0 0 1 54 648 Tm (thread. This means the runtime is already a concurrent system even though the processing) Tj
-1 0 0 1 54 633 Tm (stage is still simple.) Tj
-1 0 0 1 54 618 Tm () Tj
-1 0 0 1 54 603 Tm (Producer Thread) Tj
-1 0 0 1 54 588 Tm (_produce\(\) iterates over self._source.chunks\(\) . For every chunk:) Tj
-1 0 0 1 54 573 Tm () Tj
-1 0 0 1 54 558 Tm (check whether stop was requested) Tj
-1 0 0 1 54 543 Tm () Tj
-1 0 0 1 54 528 Tm (push into the bounded queue) Tj
+1 0 0 1 54 723 Tm (adapter queue: callback-safe handoff) Tj
+1 0 0 1 54 708 Tm () Tj
+1 0 0 1 54 693 Tm (runtime queue: application-level backpressure and drop policy) Tj
+1 0 0 1 54 678 Tm () Tj
+1 0 0 1 54 663 Tm (10. Runtime: The Actual Working Pipeline) Tj
+1 0 0 1 54 648 Tm (application/runtime.py is the operational center of the codebase.) Tj
+1 0 0 1 54 633 Tm () Tj
+1 0 0 1 54 618 Tm (Two Logical Sides) Tj
+1 0 0 1 54 603 Tm () Tj
+1 0 0 1 54 588 Tm (Producer Side) Tj
+1 0 0 1 54 573 Tm (Reads chunks from the source and inserts them into the bounded queue.) Tj
+1 0 0 1 54 558 Tm () Tj
+1 0 0 1 54 543 Tm (Consumer Side) Tj
+1 0 0 1 54 528 Tm (Pulls chunks from the bounded queue, processes them, and logs metrics.) Tj
 1 0 0 1 54 513 Tm () Tj
-1 0 0 1 54 498 Tm (increment chunks_received) Tj
-1 0 0 1 54 483 Tm () Tj
-1 0 0 1 54 468 Tm (increment chunks_dropped if the queue dropped one) Tj
-1 0 0 1 54 453 Tm () Tj
-1 0 0 1 54 438 Tm (update queue_high_water_mark) Tj
-1 0 0 1 54 423 Tm () Tj
-1 0 0 1 54 408 Tm (Consumer Loop) Tj
-1 0 0 1 54 393 Tm (The main loop in run\(\) does this repeatedly:) Tj
-1 0 0 1 54 378 Tm () Tj
-1 0 0 1 54 363 Tm (try to get a chunk from the bounded queue) Tj
-1 0 0 1 54 348 Tm () Tj
-1 0 0 1 54 333 Tm (if a chunk exists, process it) Tj
-1 0 0 1 54 318 Tm () Tj
-1 0 0 1 54 303 Tm (if the diagnostics interval has elapsed, log a snapshot) Tj
-1 0 0 1 54 288 Tm () Tj
-1 0 0 1 54 273 Tm (keep going until the producer is dead and the queue is empty) Tj
-1 0 0 1 54 258 Tm () Tj
-1 0 0 1 54 243 Tm (11. Bounded Queue and Backpressure) Tj
-1 0 0 1 54 228 Tm (BoundedAudioQueue implements a deliberate real-time policy: when the queue is full, drop the) Tj
-1 0 0 1 54 213 Tm (oldest chunk instead of blocking the producer.) Tj
+1 0 0 1 54 498 Tm (run\(\)) Tj
+1 0 0 1 54 483 Tm (run\(\) creates a producer thread and then immediately starts the consumer loop on the main) Tj
+1 0 0 1 54 468 Tm (thread. This means the runtime is already a concurrent system even though the processing) Tj
+1 0 0 1 54 453 Tm (stage is still simple.) Tj
+1 0 0 1 54 438 Tm () Tj
+1 0 0 1 54 423 Tm (Producer Thread) Tj
+1 0 0 1 54 408 Tm (_produce\(\) iterates over self._source.chunks\(\) . For every chunk:) Tj
+1 0 0 1 54 393 Tm () Tj
+1 0 0 1 54 378 Tm (check whether stop was requested) Tj
+1 0 0 1 54 363 Tm () Tj
+1 0 0 1 54 348 Tm (push into the bounded queue) Tj
+1 0 0 1 54 333 Tm () Tj
+1 0 0 1 54 318 Tm (increment chunks_received) Tj
+1 0 0 1 54 303 Tm () Tj
+1 0 0 1 54 288 Tm (increment chunks_dropped if the queue dropped one) Tj
+1 0 0 1 54 273 Tm () Tj
+1 0 0 1 54 258 Tm (update queue_high_water_mark) Tj
+1 0 0 1 54 243 Tm () Tj
+1 0 0 1 54 228 Tm (Consumer Loop) Tj
+1 0 0 1 54 213 Tm (The main loop in run\(\) does this repeatedly:) Tj
 1 0 0 1 54 198 Tm () Tj
-1 0 0 1 54 183 Tm (if len\(self._items\) == self._capacity:) Tj
-1 0 0 1 54 168 Tm (    self._items.popleft\(\)) Tj
-1 0 0 1 54 153 Tm (    dropped = True) Tj
-1 0 0 1 54 138 Tm (self._items.append\(item\)) Tj
-1 0 0 1 54 123 Tm () Tj
-1 0 0 1 54 108 Tm (That decision reflects the architecture document: stale live audio is usually less valuable) Tj
-1 0 0 1 54 93 Tm (than current live audio. This is why the queue is bounded at all. If it were unbounded,) Tj
-1 0 0 1 54 78 Tm (latency could grow silently.) Tj
+1 0 0 1 54 183 Tm (try to get a chunk from the bounded queue) Tj
+1 0 0 1 54 168 Tm () Tj
+1 0 0 1 54 153 Tm (if a chunk exists, process it) Tj
+1 0 0 1 54 138 Tm () Tj
+1 0 0 1 54 123 Tm (if the diagnostics interval has elapsed, log a snapshot) Tj
+1 0 0 1 54 108 Tm () Tj
+1 0 0 1 54 93 Tm (keep going until the producer is dead and the queue is empty) Tj
+1 0 0 1 54 78 Tm () Tj
 ET
 endstream
 endobj
@@ -457,54 +457,54 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 20 0 R >>
 endobj
 20 0 obj
-<< /Length 2285 >>
+<< /Length 2384 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm () Tj
-1 0 0 1 54 723 Tm (Why Oldest Is Dropped) Tj
-1 0 0 1 54 708 Tm () Tj
-1 0 0 1 54 693 Tm (the system stays near real time) Tj
-1 0 0 1 54 678 Tm () Tj
-1 0 0 1 54 663 Tm (memory usage stays bounded) Tj
-1 0 0 1 54 648 Tm () Tj
-1 0 0 1 54 633 Tm (capture is not blocked by downstream slowness) Tj
+1 0 0 1 54 738 Tm (11. Bounded Queue and Backpressure) Tj
+1 0 0 1 54 723 Tm (BoundedAudioQueue implements a deliberate real-time policy: when the queue is full, drop the) Tj
+1 0 0 1 54 708 Tm (oldest chunk instead of blocking the producer.) Tj
+1 0 0 1 54 693 Tm () Tj
+1 0 0 1 54 678 Tm (if len\(self._items\) == self._capacity:) Tj
+1 0 0 1 54 663 Tm (    self._items.popleft\(\)) Tj
+1 0 0 1 54 648 Tm (    dropped = True) Tj
+1 0 0 1 54 633 Tm (self._items.append\(item\)) Tj
 1 0 0 1 54 618 Tm () Tj
-1 0 0 1 54 603 Tm (metrics still reveal the overload via chunks_dropped) Tj
-1 0 0 1 54 588 Tm () Tj
-1 0 0 1 54 573 Tm (12. Processing Step Today) Tj
-1 0 0 1 54 558 Tm (The current processing logic is intentionally small. It is not yet feature extraction or) Tj
-1 0 0 1 54 543 Tm (alignment.) Tj
-1 0 0 1 54 528 Tm (In _process\(chunk\) the runtime computes:) Tj
-1 0 0 1 54 513 Tm () Tj
-1 0 0 1 54 498 Tm (RMS energy from the waveform) Tj
-1 0 0 1 54 483 Tm () Tj
-1 0 0 1 54 468 Tm (peak absolute value from the waveform) Tj
-1 0 0 1 54 453 Tm () Tj
-1 0 0 1 54 438 Tm (Then it classifies the chunk:) Tj
-1 0 0 1 54 423 Tm () Tj
-1 0 0 1 54 408 Tm (silent if rms <= silence_threshold_rms) Tj
-1 0 0 1 54 393 Tm () Tj
-1 0 0 1 54 378 Tm (clipped if peak >= clipping_threshold_peak) Tj
-1 0 0 1 54 363 Tm () Tj
-1 0 0 1 54 348 Tm (After those diagnostics, the runtime optionally passes the chunk into a feature extractor.) Tj
-1 0 0 1 54 333 Tm (The default path uses a deterministic simulated extractor, but there is now an ONNX-backed) Tj
-1 0 0 1 54 318 Tm (extractor behind the same port.) Tj
+1 0 0 1 54 603 Tm (That decision reflects the architecture document: stale live audio is usually less valuable) Tj
+1 0 0 1 54 588 Tm (than current live audio. This is why the queue is bounded at all. If it were unbounded,) Tj
+1 0 0 1 54 573 Tm (latency could grow silently.) Tj
+1 0 0 1 54 558 Tm () Tj
+1 0 0 1 54 543 Tm (Why Oldest Is Dropped) Tj
+1 0 0 1 54 528 Tm () Tj
+1 0 0 1 54 513 Tm (the system stays near real time) Tj
+1 0 0 1 54 498 Tm () Tj
+1 0 0 1 54 483 Tm (memory usage stays bounded) Tj
+1 0 0 1 54 468 Tm () Tj
+1 0 0 1 54 453 Tm (capture is not blocked by downstream slowness) Tj
+1 0 0 1 54 438 Tm () Tj
+1 0 0 1 54 423 Tm (metrics still reveal the overload via chunks_dropped) Tj
+1 0 0 1 54 408 Tm () Tj
+1 0 0 1 54 393 Tm (12. Processing Step Today) Tj
+1 0 0 1 54 378 Tm (The current processing logic is intentionally small. It is not yet feature extraction or) Tj
+1 0 0 1 54 363 Tm (alignment.) Tj
+1 0 0 1 54 348 Tm (In _process\(chunk\) the runtime computes:) Tj
+1 0 0 1 54 333 Tm () Tj
+1 0 0 1 54 318 Tm (RMS energy from the waveform) Tj
 1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (13. Feature Extraction Stage) Tj
-1 0 0 1 54 273 Tm (The code now has two feature extraction adapters:) Tj
-1 0 0 1 54 258 Tm () Tj
-1 0 0 1 54 243 Tm (adapters/features/simulated.py) Tj
-1 0 0 1 54 228 Tm () Tj
-1 0 0 1 54 213 Tm (adapters/features/onnx_runtime.py) Tj
-1 0 0 1 54 198 Tm () Tj
-1 0 0 1 54 183 Tm (Both implement the same FeatureExtractor port and both convert an AudioChunk into one or) Tj
-1 0 0 1 54 168 Tm (more FeatureFrame values.) Tj
-1 0 0 1 54 153 Tm () Tj
-1 0 0 1 54 138 Tm (Deterministic Simulated Extractor) Tj
-1 0 0 1 54 123 Tm (The simulated extractor is the first Sprint 2 slice. It converts an AudioChunk into a single) Tj
-1 0 0 1 54 108 Tm (FeatureFrame with a small deterministic vector.) Tj
-1 0 0 1 54 93 Tm (The simulated extractor currently encodes:) Tj
+1 0 0 1 54 288 Tm (peak absolute value from the waveform) Tj
+1 0 0 1 54 273 Tm () Tj
+1 0 0 1 54 258 Tm (Then it classifies the chunk:) Tj
+1 0 0 1 54 243 Tm () Tj
+1 0 0 1 54 228 Tm (silent if rms <= silence_threshold_rms) Tj
+1 0 0 1 54 213 Tm () Tj
+1 0 0 1 54 198 Tm (clipped if peak >= clipping_threshold_peak) Tj
+1 0 0 1 54 183 Tm () Tj
+1 0 0 1 54 168 Tm (After those diagnostics, the runtime optionally passes the chunk into a feature extractor.) Tj
+1 0 0 1 54 153 Tm (The default path uses a deterministic simulated extractor, but there is now an ONNX-backed) Tj
+1 0 0 1 54 138 Tm (extractor behind the same port.) Tj
+1 0 0 1 54 123 Tm () Tj
+1 0 0 1 54 108 Tm (13. Feature Extraction Stage) Tj
+1 0 0 1 54 93 Tm (The code now has two feature extraction adapters:) Tj
 1 0 0 1 54 78 Tm () Tj
 ET
 endstream
@@ -513,55 +513,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 22 0 R >>
 endobj
 22 0 obj
-<< /Length 2126 >>
+<< /Length 2321 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm (RMS) Tj
+1 0 0 1 54 738 Tm (adapters/features/simulated.py) Tj
 1 0 0 1 54 723 Tm () Tj
-1 0 0 1 54 708 Tm (peak) Tj
+1 0 0 1 54 708 Tm (adapters/features/onnx_runtime.py) Tj
 1 0 0 1 54 693 Tm () Tj
-1 0 0 1 54 678 Tm (mean absolute amplitude) Tj
-1 0 0 1 54 663 Tm () Tj
-1 0 0 1 54 648 Tm (zero-crossing rate) Tj
-1 0 0 1 54 633 Tm () Tj
-1 0 0 1 54 618 Tm (The point is not model quality yet. The point is to prove the runtime can hand chunks into a) Tj
-1 0 0 1 54 603 Tm (feature extraction stage and count valid versus invalid outputs.) Tj
-1 0 0 1 54 588 Tm () Tj
-1 0 0 1 54 573 Tm (ONNX Runtime Extractor) Tj
-1 0 0 1 54 558 Tm (The ONNX adapter loads a model path, inspects the first input and output names from the) Tj
-1 0 0 1 54 543 Tm (inference session, normalizes waveform amplitude, runs the model, and converts the output) Tj
-1 0 0 1 54 528 Tm (tensor into one or more FeatureFrame objects.) Tj
-1 0 0 1 54 513 Tm (This path is now available, but it still depends on you providing a real model file through) Tj
-1 0 0 1 54 498 Tm (configuration.) Tj
+1 0 0 1 54 678 Tm (Both implement the same FeatureExtractor port and both convert an AudioChunk into one or) Tj
+1 0 0 1 54 663 Tm (more FeatureFrame values.) Tj
+1 0 0 1 54 648 Tm () Tj
+1 0 0 1 54 633 Tm (Deterministic Simulated Extractor) Tj
+1 0 0 1 54 618 Tm (The simulated extractor is the first Sprint 2 slice. It converts an AudioChunk into a single) Tj
+1 0 0 1 54 603 Tm (FeatureFrame with a small deterministic vector.) Tj
+1 0 0 1 54 588 Tm (The simulated extractor currently encodes:) Tj
+1 0 0 1 54 573 Tm () Tj
+1 0 0 1 54 558 Tm (RMS) Tj
+1 0 0 1 54 543 Tm () Tj
+1 0 0 1 54 528 Tm (peak) Tj
+1 0 0 1 54 513 Tm () Tj
+1 0 0 1 54 498 Tm (mean absolute amplitude) Tj
 1 0 0 1 54 483 Tm () Tj
-1 0 0 1 54 468 Tm (Runtime Handling Of Feature Frames) Tj
+1 0 0 1 54 468 Tm (zero-crossing rate) Tj
 1 0 0 1 54 453 Tm () Tj
-1 0 0 1 54 438 Tm (valid frames increment feature_frames_processed) Tj
-1 0 0 1 54 423 Tm () Tj
-1 0 0 1 54 408 Tm (empty or non-finite frames increment invalid_inference_outputs) Tj
-1 0 0 1 54 393 Tm () Tj
-1 0 0 1 54 378 Tm (14. Metrics) Tj
-1 0 0 1 54 363 Tm (application/metrics.py stores counters in a mutable dataclass.) Tj
-1 0 0 1 54 348 Tm (Currently relevant counters:) Tj
-1 0 0 1 54 333 Tm () Tj
-1 0 0 1 54 318 Tm (chunks_received) Tj
+1 0 0 1 54 438 Tm (The point is not model quality yet. The point is to prove the runtime can hand chunks into a) Tj
+1 0 0 1 54 423 Tm (feature extraction stage and count valid versus invalid outputs.) Tj
+1 0 0 1 54 408 Tm () Tj
+1 0 0 1 54 393 Tm (ONNX Runtime Extractor) Tj
+1 0 0 1 54 378 Tm (The ONNX adapter loads a model path, inspects the first input and output names from the) Tj
+1 0 0 1 54 363 Tm (inference session, normalizes waveform amplitude, runs the model, and converts the output) Tj
+1 0 0 1 54 348 Tm (tensor into one or more FeatureFrame objects.) Tj
+1 0 0 1 54 333 Tm (This path is now available, but it still depends on you providing a real model file through) Tj
+1 0 0 1 54 318 Tm (configuration.) Tj
 1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (chunks_dropped) Tj
+1 0 0 1 54 288 Tm (Runtime Handling Of Feature Frames) Tj
 1 0 0 1 54 273 Tm () Tj
-1 0 0 1 54 258 Tm (silent_chunks) Tj
+1 0 0 1 54 258 Tm (valid frames increment feature_frames_processed) Tj
 1 0 0 1 54 243 Tm () Tj
-1 0 0 1 54 228 Tm (clipped_chunks) Tj
+1 0 0 1 54 228 Tm (empty or non-finite frames increment invalid_inference_outputs) Tj
 1 0 0 1 54 213 Tm () Tj
-1 0 0 1 54 198 Tm (queue_high_water_mark) Tj
-1 0 0 1 54 183 Tm () Tj
-1 0 0 1 54 168 Tm (feature_frames_processed) Tj
+1 0 0 1 54 198 Tm (14. Metrics) Tj
+1 0 0 1 54 183 Tm (application/metrics.py stores counters in a mutable dataclass.) Tj
+1 0 0 1 54 168 Tm (Currently relevant counters:) Tj
 1 0 0 1 54 153 Tm () Tj
-1 0 0 1 54 138 Tm (invalid_inference_outputs) Tj
+1 0 0 1 54 138 Tm (chunks_received) Tj
 1 0 0 1 54 123 Tm () Tj
-1 0 0 1 54 108 Tm (Other counters are placeholders for future stages such as feature extraction, matching, and) Tj
-1 0 0 1 54 93 Tm (presentation output.) Tj
-1 0 0 1 54 78 Tm () Tj
+1 0 0 1 54 108 Tm (chunks_dropped) Tj
+1 0 0 1 54 93 Tm () Tj
+1 0 0 1 54 78 Tm (silent_chunks) Tj
 ET
 endstream
 endobj
@@ -569,54 +569,54 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 24 0 R >>
 endobj
 24 0 obj
-<< /Length 2073 >>
+<< /Length 1933 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm (15. Logging and RuntimeReport) Tj
-1 0 0 1 54 723 Tm (The runtime periodically emits a log line with the latest values. At the end, it returns a) Tj
-1 0 0 1 54 708 Tm (RuntimeReport .) Tj
-1 0 0 1 54 693 Tm () Tj
-1 0 0 1 54 678 Tm (device=...) Tj
-1 0 0 1 54 663 Tm (rms=...) Tj
-1 0 0 1 54 648 Tm (peak=...) Tj
-1 0 0 1 54 633 Tm (queue=current/capacity) Tj
-1 0 0 1 54 618 Tm (chunks_received=...) Tj
-1 0 0 1 54 603 Tm (chunks_dropped=...) Tj
-1 0 0 1 54 588 Tm (silent_chunks=...) Tj
-1 0 0 1 54 573 Tm (clipped_chunks=...) Tj
-1 0 0 1 54 558 Tm () Tj
-1 0 0 1 54 543 Tm (feature_frames_processed=...) Tj
-1 0 0 1 54 528 Tm (RuntimeReport is effectively the final snapshot returned to main\(\) . It contains:) Tj
+1 0 0 1 54 738 Tm () Tj
+1 0 0 1 54 723 Tm (clipped_chunks) Tj
+1 0 0 1 54 708 Tm () Tj
+1 0 0 1 54 693 Tm (queue_high_water_mark) Tj
+1 0 0 1 54 678 Tm () Tj
+1 0 0 1 54 663 Tm (feature_frames_processed) Tj
+1 0 0 1 54 648 Tm () Tj
+1 0 0 1 54 633 Tm (invalid_inference_outputs) Tj
+1 0 0 1 54 618 Tm () Tj
+1 0 0 1 54 603 Tm (Other counters are placeholders for future stages such as feature extraction, matching, and) Tj
+1 0 0 1 54 588 Tm (presentation output.) Tj
+1 0 0 1 54 573 Tm () Tj
+1 0 0 1 54 558 Tm (15. Logging and RuntimeReport) Tj
+1 0 0 1 54 543 Tm (The runtime periodically emits a log line with the latest values. At the end, it returns a) Tj
+1 0 0 1 54 528 Tm (RuntimeReport .) Tj
 1 0 0 1 54 513 Tm () Tj
-1 0 0 1 54 498 Tm (device name) Tj
-1 0 0 1 54 483 Tm () Tj
-1 0 0 1 54 468 Tm (metrics snapshot) Tj
-1 0 0 1 54 453 Tm () Tj
-1 0 0 1 54 438 Tm (last observed RMS) Tj
-1 0 0 1 54 423 Tm () Tj
-1 0 0 1 54 408 Tm (last observed peak) Tj
-1 0 0 1 54 393 Tm () Tj
-1 0 0 1 54 378 Tm (final queue size and capacity) Tj
-1 0 0 1 54 363 Tm () Tj
-1 0 0 1 54 348 Tm (16. Threading Model) Tj
-1 0 0 1 54 333 Tm (The current runtime has a simple but important threading model:) Tj
-1 0 0 1 54 318 Tm () Tj
-1 0 0 1 54 303 Tm (main thread: consumer loop + periodic logging) Tj
-1 0 0 1 54 288 Tm () Tj
-1 0 0 1 54 273 Tm (producer thread: iterates source chunks and fills bounded queue) Tj
-1 0 0 1 54 258 Tm () Tj
-1 0 0 1 54 243 Tm (optional source callback thread: inside sounddevice when microphone mode is active) Tj
-1 0 0 1 54 228 Tm () Tj
-1 0 0 1 54 213 Tm (In microphone mode this means there can effectively be three layers of execution:) Tj
-1 0 0 1 54 198 Tm () Tj
-1 0 0 1 54 183 Tm (sounddevice callback receives frames) Tj
-1 0 0 1 54 168 Tm () Tj
-1 0 0 1 54 153 Tm (microphone adapter iterator yields chunks) Tj
+1 0 0 1 54 498 Tm (device=...) Tj
+1 0 0 1 54 483 Tm (rms=...) Tj
+1 0 0 1 54 468 Tm (peak=...) Tj
+1 0 0 1 54 453 Tm (queue=current/capacity) Tj
+1 0 0 1 54 438 Tm (chunks_received=...) Tj
+1 0 0 1 54 423 Tm (chunks_dropped=...) Tj
+1 0 0 1 54 408 Tm (silent_chunks=...) Tj
+1 0 0 1 54 393 Tm (clipped_chunks=...) Tj
+1 0 0 1 54 378 Tm () Tj
+1 0 0 1 54 363 Tm (feature_frames_processed=...) Tj
+1 0 0 1 54 348 Tm (RuntimeReport is effectively the final snapshot returned to main\(\) . It contains:) Tj
+1 0 0 1 54 333 Tm () Tj
+1 0 0 1 54 318 Tm (device name) Tj
+1 0 0 1 54 303 Tm () Tj
+1 0 0 1 54 288 Tm (metrics snapshot) Tj
+1 0 0 1 54 273 Tm () Tj
+1 0 0 1 54 258 Tm (last observed RMS) Tj
+1 0 0 1 54 243 Tm () Tj
+1 0 0 1 54 228 Tm (last observed peak) Tj
+1 0 0 1 54 213 Tm () Tj
+1 0 0 1 54 198 Tm (final queue size and capacity) Tj
+1 0 0 1 54 183 Tm () Tj
+1 0 0 1 54 168 Tm (16. Threading Model) Tj
+1 0 0 1 54 153 Tm (The current runtime has a simple but important threading model:) Tj
 1 0 0 1 54 138 Tm () Tj
-1 0 0 1 54 123 Tm (runtime producer thread forwards them into the bounded queue) Tj
+1 0 0 1 54 123 Tm (main thread: consumer loop + periodic logging) Tj
 1 0 0 1 54 108 Tm () Tj
-1 0 0 1 54 93 Tm (main-thread consumer processes them) Tj
+1 0 0 1 54 93 Tm (producer thread: iterates source chunks and fills bounded queue) Tj
 1 0 0 1 54 78 Tm () Tj
 ET
 endstream
@@ -625,55 +625,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 26 0 R >>
 endobj
 26 0 obj
-<< /Length 2594 >>
+<< /Length 2477 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm (17. Shutdown Behavior) Tj
-1 0 0 1 54 723 Tm (Shutdown is coordinated through events and queue closing.) Tj
-1 0 0 1 54 708 Tm () Tj
-1 0 0 1 54 693 Tm (AudioIngestionRuntime.stop\(\) sets a stop event) Tj
-1 0 0 1 54 678 Tm () Tj
-1 0 0 1 54 663 Tm (the runtime queue is closed) Tj
-1 0 0 1 54 648 Tm () Tj
-1 0 0 1 54 633 Tm (if the source has a stop\(\) method, it is called) Tj
-1 0 0 1 54 618 Tm () Tj
-1 0 0 1 54 603 Tm (the producer thread is joined before the final report returns) Tj
-1 0 0 1 54 588 Tm () Tj
-1 0 0 1 54 573 Tm (This is why both adapters implement their own way of interrupting waits: the simulated) Tj
-1 0 0 1 54 558 Tm (source wakes its event-based delay and the microphone source pushes a sentinel through its) Tj
-1 0 0 1 54 543 Tm (internal queue.) Tj
+1 0 0 1 54 738 Tm (optional source callback thread: inside sounddevice when microphone mode is active) Tj
+1 0 0 1 54 723 Tm () Tj
+1 0 0 1 54 708 Tm (In microphone mode this means there can effectively be three layers of execution:) Tj
+1 0 0 1 54 693 Tm () Tj
+1 0 0 1 54 678 Tm (sounddevice callback receives frames) Tj
+1 0 0 1 54 663 Tm () Tj
+1 0 0 1 54 648 Tm (microphone adapter iterator yields chunks) Tj
+1 0 0 1 54 633 Tm () Tj
+1 0 0 1 54 618 Tm (runtime producer thread forwards them into the bounded queue) Tj
+1 0 0 1 54 603 Tm () Tj
+1 0 0 1 54 588 Tm (main-thread consumer processes them) Tj
+1 0 0 1 54 573 Tm () Tj
+1 0 0 1 54 558 Tm (17. Shutdown Behavior) Tj
+1 0 0 1 54 543 Tm (Shutdown is coordinated through events and queue closing.) Tj
 1 0 0 1 54 528 Tm () Tj
-1 0 0 1 54 513 Tm (18. What the Code Does Not Yet Do) Tj
-1 0 0 1 54 498 Tm (These planned concepts exist in shape but not in runtime behavior:) Tj
-1 0 0 1 54 483 Tm () Tj
-1 0 0 1 54 468 Tm (MatchResult : no alignment engine produces it yet) Tj
-1 0 0 1 54 453 Tm () Tj
-1 0 0 1 54 438 Tm (SlideCommand : no presentation adapter sends it yet) Tj
-1 0 0 1 54 423 Tm () Tj
-1 0 0 1 54 408 Tm (So if you are trying to understand ?where the lyrics alignment happens,? the honest answer) Tj
-1 0 0 1 54 393 Tm (is: it does not happen yet in the executable path. What exists today is the ingestion) Tj
-1 0 0 1 54 378 Tm (foundation that alignment will later plug into.) Tj
-1 0 0 1 54 363 Tm () Tj
-1 0 0 1 54 348 Tm (19. End-to-End Example: Simulated Mode) Tj
-1 0 0 1 54 333 Tm () Tj
-1 0 0 1 54 318 Tm (.venv/bin/python -m lyrics_aligner.main) Tj
+1 0 0 1 54 513 Tm (AudioIngestionRuntime.stop\(\) sets a stop event) Tj
+1 0 0 1 54 498 Tm () Tj
+1 0 0 1 54 483 Tm (the runtime queue is closed) Tj
+1 0 0 1 54 468 Tm () Tj
+1 0 0 1 54 453 Tm (if the source has a stop\(\) method, it is called) Tj
+1 0 0 1 54 438 Tm () Tj
+1 0 0 1 54 423 Tm (the producer thread is joined before the final report returns) Tj
+1 0 0 1 54 408 Tm () Tj
+1 0 0 1 54 393 Tm (This is why both adapters implement their own way of interrupting waits: the simulated) Tj
+1 0 0 1 54 378 Tm (source wakes its event-based delay and the microphone source pushes a sentinel through its) Tj
+1 0 0 1 54 363 Tm (internal queue.) Tj
+1 0 0 1 54 348 Tm () Tj
+1 0 0 1 54 333 Tm (18. What the Code Does Not Yet Do) Tj
+1 0 0 1 54 318 Tm (These planned concepts exist in shape but not in runtime behavior:) Tj
 1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (1. main parses args) Tj
-1 0 0 1 54 273 Tm (2. config resolves to audio_source=simulated) Tj
-1 0 0 1 54 258 Tm (3. SimulatedAudioSource is created) Tj
-1 0 0 1 54 243 Tm (4. runtime starts producer thread) Tj
-1 0 0 1 54 228 Tm (5. simulated source yields timed sine-wave chunks) Tj
-1 0 0 1 54 213 Tm (6. producer inserts them into BoundedAudioQueue) Tj
-1 0 0 1 54 198 Tm (7. consumer computes RMS/peak on each chunk) Tj
-1 0 0 1 54 183 Tm (8. simulated feature extractor produces one FeatureFrame per chunk) Tj
-1 0 0 1 54 168 Tm (9. periodic logs are emitted) Tj
-1 0 0 1 54 153 Tm (10. final RuntimeReport is returned and logged) Tj
-1 0 0 1 54 138 Tm () Tj
-1 0 0 1 54 123 Tm (20. End-to-End Example: Microphone Mode) Tj
-1 0 0 1 54 108 Tm () Tj
-1 0 0 1 54 93 Tm (.venv/bin/python -m lyrics_aligner.main --audio-source microphone --input-device "Built-in) Tj
-1 0 0 1 54 78 Tm (Microphone") Tj
+1 0 0 1 54 288 Tm (MatchResult : no alignment engine produces it yet) Tj
+1 0 0 1 54 273 Tm () Tj
+1 0 0 1 54 258 Tm (SlideCommand : no presentation adapter sends it yet) Tj
+1 0 0 1 54 243 Tm () Tj
+1 0 0 1 54 228 Tm (So if you are trying to understand ?where the lyrics alignment happens,? the honest answer) Tj
+1 0 0 1 54 213 Tm (is: it does not happen yet in the executable path. What exists today is the ingestion) Tj
+1 0 0 1 54 198 Tm (foundation that alignment will later plug into.) Tj
+1 0 0 1 54 183 Tm () Tj
+1 0 0 1 54 168 Tm (19. End-to-End Example: Simulated Mode) Tj
+1 0 0 1 54 153 Tm () Tj
+1 0 0 1 54 138 Tm (.venv/bin/python -m lyrics_aligner.main) Tj
+1 0 0 1 54 123 Tm () Tj
+1 0 0 1 54 108 Tm (1. main parses args) Tj
+1 0 0 1 54 93 Tm (2. config resolves to audio_source=simulated) Tj
+1 0 0 1 54 78 Tm (3. SimulatedAudioSource is created) Tj
 ET
 endstream
 endobj
@@ -681,55 +681,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 28 0 R >>
 endobj
 28 0 obj
-<< /Length 2498 >>
+<< /Length 2689 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm () Tj
-1 0 0 1 54 723 Tm (1. main parses args) Tj
-1 0 0 1 54 708 Tm (2. config resolves to audio_source=microphone) Tj
-1 0 0 1 54 693 Tm (3. MicrophoneAudioSource is created) Tj
-1 0 0 1 54 678 Tm (4. runtime starts producer thread) Tj
-1 0 0 1 54 663 Tm (5. sounddevice callback receives live frames) Tj
-1 0 0 1 54 648 Tm (6. callback converts frames to AudioChunk and enqueues them internally) Tj
-1 0 0 1 54 633 Tm (7. microphone source iterator yields those chunks) Tj
-1 0 0 1 54 618 Tm (8. runtime producer inserts them into the bounded queue) Tj
-1 0 0 1 54 603 Tm (9. runtime consumer computes diagnostics and feature frames, then logs metrics) Tj
-1 0 0 1 54 588 Tm () Tj
-1 0 0 1 54 573 Tm (21. End-to-End Example: ONNX Extractor Mode) Tj
+1 0 0 1 54 738 Tm (4. runtime starts producer thread) Tj
+1 0 0 1 54 723 Tm (5. simulated source yields timed sine-wave chunks) Tj
+1 0 0 1 54 708 Tm (6. producer inserts them into BoundedAudioQueue) Tj
+1 0 0 1 54 693 Tm (7. consumer computes RMS/peak on each chunk) Tj
+1 0 0 1 54 678 Tm (8. simulated feature extractor produces one FeatureFrame per chunk) Tj
+1 0 0 1 54 663 Tm (9. periodic logs are emitted) Tj
+1 0 0 1 54 648 Tm (10. final RuntimeReport is returned and logged) Tj
+1 0 0 1 54 633 Tm () Tj
+1 0 0 1 54 618 Tm (20. End-to-End Example: Microphone Mode) Tj
+1 0 0 1 54 603 Tm () Tj
+1 0 0 1 54 588 Tm (.venv/bin/python -m lyrics_aligner.main --audio-source microphone --input-device "Built-in) Tj
+1 0 0 1 54 573 Tm (Microphone") Tj
 1 0 0 1 54 558 Tm () Tj
-1 0 0 1 54 543 Tm (.venv/bin/python -m lyrics_aligner.main \\) Tj
-1 0 0 1 54 528 Tm (  --audio-source simulated \\) Tj
-1 0 0 1 54 513 Tm (  --feature-extractor onnx \\) Tj
-1 0 0 1 54 498 Tm (  --feature-model-path /absolute/path/to/model.onnx) Tj
-1 0 0 1 54 483 Tm () Tj
-1 0 0 1 54 468 Tm (1. main parses args) Tj
-1 0 0 1 54 453 Tm (2. config resolves to feature_extractor=onnx) Tj
-1 0 0 1 54 438 Tm (3. simulated audio source is created) Tj
-1 0 0 1 54 423 Tm (4. ONNX feature extractor is created from the model path) Tj
-1 0 0 1 54 408 Tm (5. runtime producer yields chunks into the bounded queue) Tj
-1 0 0 1 54 393 Tm (6. runtime consumer computes diagnostics) Tj
-1 0 0 1 54 378 Tm (7. runtime calls the ONNX extractor for each chunk) Tj
-1 0 0 1 54 363 Tm (8. returned feature frames are validated and counted) Tj
-1 0 0 1 54 348 Tm (9. periodic logs and final RuntimeReport include feature frame metrics) Tj
-1 0 0 1 54 333 Tm () Tj
-1 0 0 1 54 318 Tm (22. Best Way to Understand the Code in Practice) Tj
+1 0 0 1 54 543 Tm (1. main parses args) Tj
+1 0 0 1 54 528 Tm (2. config resolves to audio_source=microphone) Tj
+1 0 0 1 54 513 Tm (3. MicrophoneAudioSource is created) Tj
+1 0 0 1 54 498 Tm (4. runtime starts producer thread) Tj
+1 0 0 1 54 483 Tm (5. sounddevice callback receives live frames) Tj
+1 0 0 1 54 468 Tm (6. callback converts frames to AudioChunk and enqueues them internally) Tj
+1 0 0 1 54 453 Tm (7. microphone source iterator yields those chunks) Tj
+1 0 0 1 54 438 Tm (8. runtime producer inserts them into the bounded queue) Tj
+1 0 0 1 54 423 Tm (9. runtime consumer computes diagnostics and feature frames, then logs metrics) Tj
+1 0 0 1 54 408 Tm () Tj
+1 0 0 1 54 393 Tm (21. End-to-End Example: ONNX Extractor Mode) Tj
+1 0 0 1 54 378 Tm () Tj
+1 0 0 1 54 363 Tm (.venv/bin/python -m lyrics_aligner.main \\) Tj
+1 0 0 1 54 348 Tm (  --audio-source simulated \\) Tj
+1 0 0 1 54 333 Tm (  --feature-extractor onnx \\) Tj
+1 0 0 1 54 318 Tm (  --feature-model-path /absolute/path/to/model.onnx) Tj
 1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (Run simulated mode first.) Tj
-1 0 0 1 54 273 Tm () Tj
-1 0 0 1 54 258 Tm (Read main.py top to bottom.) Tj
-1 0 0 1 54 243 Tm () Tj
-1 0 0 1 54 228 Tm (Read runtime.py next.) Tj
-1 0 0 1 54 213 Tm () Tj
-1 0 0 1 54 198 Tm (Then read simulated.py .) Tj
-1 0 0 1 54 183 Tm () Tj
-1 0 0 1 54 168 Tm (Only after that read microphone.py .) Tj
+1 0 0 1 54 288 Tm (1. main parses args) Tj
+1 0 0 1 54 273 Tm (2. config resolves to feature_extractor=onnx) Tj
+1 0 0 1 54 258 Tm (3. simulated audio source is created) Tj
+1 0 0 1 54 243 Tm (4. ONNX feature extractor is created from the model path) Tj
+1 0 0 1 54 228 Tm (5. runtime producer yields chunks into the bounded queue) Tj
+1 0 0 1 54 213 Tm (6. runtime consumer computes diagnostics) Tj
+1 0 0 1 54 198 Tm (7. runtime calls the ONNX extractor for each chunk) Tj
+1 0 0 1 54 183 Tm (8. returned feature frames are validated and counted) Tj
+1 0 0 1 54 168 Tm (9. periodic logs and final RuntimeReport include feature frame metrics) Tj
 1 0 0 1 54 153 Tm () Tj
-1 0 0 1 54 138 Tm (Then read adapters/features/simulated.py .) Tj
+1 0 0 1 54 138 Tm (22. Best Way to Understand the Code in Practice) Tj
 1 0 0 1 54 123 Tm () Tj
-1 0 0 1 54 108 Tm (Finally read adapters/features/onnx_runtime.py .) Tj
+1 0 0 1 54 108 Tm (Run simulated mode first.) Tj
 1 0 0 1 54 93 Tm () Tj
-1 0 0 1 54 78 Tm (That order works because simulated mode is the simplest executable path. If you start with) Tj
+1 0 0 1 54 78 Tm (Read main.py top to bottom.) Tj
 ET
 endstream
 endobj
@@ -737,55 +737,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 30 0 R >>
 endobj
 30 0 obj
-<< /Length 2129 >>
+<< /Length 2229 >>
 stream
 BT
 /F1 11 Tf
-1 0 0 1 54 738 Tm (the microphone adapter, you end up learning callback plumbing before you understand the) Tj
-1 0 0 1 54 723 Tm (system around it.) Tj
+1 0 0 1 54 738 Tm () Tj
+1 0 0 1 54 723 Tm (Read runtime.py next.) Tj
 1 0 0 1 54 708 Tm () Tj
-1 0 0 1 54 693 Tm (23. How To Test The Current Sprint) Tj
-1 0 0 1 54 678 Tm (The current sprint is mostly about proving the ingestion path works reliably. That means) Tj
-1 0 0 1 54 663 Tm (testing should cover both code quality and runtime behavior.) Tj
+1 0 0 1 54 693 Tm (Then read simulated.py .) Tj
+1 0 0 1 54 678 Tm () Tj
+1 0 0 1 54 663 Tm (Only after that read microphone.py .) Tj
 1 0 0 1 54 648 Tm () Tj
-1 0 0 1 54 633 Tm (Quality Checks) Tj
+1 0 0 1 54 633 Tm (Then read adapters/features/simulated.py .) Tj
 1 0 0 1 54 618 Tm () Tj
-1 0 0 1 54 603 Tm (.venv/bin/pytest) Tj
-1 0 0 1 54 588 Tm (.venv/bin/ruff check .) Tj
-1 0 0 1 54 573 Tm (/private/tmp/audio-lyrics-py311-test/bin/mypy src) Tj
-1 0 0 1 54 558 Tm () Tj
-1 0 0 1 54 543 Tm (Those commands validate tests, style, and typing.) Tj
+1 0 0 1 54 603 Tm (Finally read adapters/features/onnx_runtime.py .) Tj
+1 0 0 1 54 588 Tm () Tj
+1 0 0 1 54 573 Tm (That order works because simulated mode is the simplest executable path. If you start with) Tj
+1 0 0 1 54 558 Tm (the microphone adapter, you end up learning callback plumbing before you understand the) Tj
+1 0 0 1 54 543 Tm (system around it.) Tj
 1 0 0 1 54 528 Tm () Tj
-1 0 0 1 54 513 Tm (Walkthrough PDF Check) Tj
-1 0 0 1 54 498 Tm () Tj
-1 0 0 1 54 483 Tm (python3 scripts/generate_runtime_walkthrough_pdf.py) Tj
-1 0 0 1 54 468 Tm (git diff --exit-code -- docs/runtime-flow-walkthrough.pdf) Tj
-1 0 0 1 54 453 Tm () Tj
-1 0 0 1 54 438 Tm (If the HTML walkthrough changes, the PDF should change with it. The second command confirms) Tj
-1 0 0 1 54 423 Tm (the checked-in PDF is current.) Tj
-1 0 0 1 54 408 Tm () Tj
-1 0 0 1 54 393 Tm (Manual Simulated Runtime Test) Tj
+1 0 0 1 54 513 Tm (23. How To Test The Current Sprint) Tj
+1 0 0 1 54 498 Tm (The current sprint is mostly about proving the ingestion path works reliably. That means) Tj
+1 0 0 1 54 483 Tm (testing should cover both code quality and runtime behavior.) Tj
+1 0 0 1 54 468 Tm () Tj
+1 0 0 1 54 453 Tm (Quality Checks) Tj
+1 0 0 1 54 438 Tm () Tj
+1 0 0 1 54 423 Tm (.venv/bin/pytest) Tj
+1 0 0 1 54 408 Tm (.venv/bin/ruff check .) Tj
+1 0 0 1 54 393 Tm (/private/tmp/audio-lyrics-py311-test/bin/mypy src) Tj
 1 0 0 1 54 378 Tm () Tj
-1 0 0 1 54 363 Tm (.venv/bin/python -m lyrics_aligner.main --audio-source simulated) Tj
-1 0 0 1 54 348 Tm (--simulation-duration-seconds 5.0) Tj
-1 0 0 1 54 333 Tm () Tj
-1 0 0 1 54 318 Tm (Expected results:) Tj
-1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (chunks_received rises steadily) Tj
+1 0 0 1 54 363 Tm (Those commands validate tests, style, and typing.) Tj
+1 0 0 1 54 348 Tm () Tj
+1 0 0 1 54 333 Tm (Walkthrough PDF Check) Tj
+1 0 0 1 54 318 Tm () Tj
+1 0 0 1 54 303 Tm (python3 scripts/generate_runtime_walkthrough_pdf.py) Tj
+1 0 0 1 54 288 Tm (git diff --exit-code -- docs/runtime-flow-walkthrough.pdf) Tj
 1 0 0 1 54 273 Tm () Tj
-1 0 0 1 54 258 Tm (chunks_dropped=0) Tj
-1 0 0 1 54 243 Tm () Tj
-1 0 0 1 54 228 Tm (queue_high_water_mark stays low) Tj
-1 0 0 1 54 213 Tm () Tj
-1 0 0 1 54 198 Tm (rms stays around 0.35) Tj
-1 0 0 1 54 183 Tm () Tj
-1 0 0 1 54 168 Tm (peak stays around 0.50) Tj
+1 0 0 1 54 258 Tm (If the HTML walkthrough changes, the PDF should change with it. The second command confirms) Tj
+1 0 0 1 54 243 Tm (the checked-in PDF is current.) Tj
+1 0 0 1 54 228 Tm () Tj
+1 0 0 1 54 213 Tm (Manual Simulated Runtime Test) Tj
+1 0 0 1 54 198 Tm () Tj
+1 0 0 1 54 183 Tm (.venv/bin/python -m lyrics_aligner.main --audio-source simulated) Tj
+1 0 0 1 54 168 Tm (--simulation-duration-seconds 5.0) Tj
 1 0 0 1 54 153 Tm () Tj
-1 0 0 1 54 138 Tm (silent_chunks=0) Tj
+1 0 0 1 54 138 Tm (Expected results:) Tj
 1 0 0 1 54 123 Tm () Tj
-1 0 0 1 54 108 Tm (clipped_chunks=0) Tj
+1 0 0 1 54 108 Tm (chunks_received rises steadily) Tj
 1 0 0 1 54 93 Tm () Tj
-1 0 0 1 54 78 Tm (feature_frames_processed rises with each processed chunk) Tj
+1 0 0 1 54 78 Tm (chunks_dropped=0) Tj
 ET
 endstream
 endobj
@@ -793,55 +793,55 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 32 0 R >>
 endobj
 32 0 obj
-<< /Length 2149 >>
+<< /Length 2058 >>
 stream
 BT
 /F1 11 Tf
 1 0 0 1 54 738 Tm () Tj
-1 0 0 1 54 723 Tm (Manual Microphone Runtime Test) Tj
+1 0 0 1 54 723 Tm (queue_high_water_mark stays low) Tj
 1 0 0 1 54 708 Tm () Tj
-1 0 0 1 54 693 Tm (.venv/bin/python -c "import sounddevice as sd; print\(sd.query_devices\(\)\)") Tj
-1 0 0 1 54 678 Tm (.venv/bin/python -m lyrics_aligner.main --audio-source microphone --input-device "Built-in) Tj
-1 0 0 1 54 663 Tm (Microphone") Tj
+1 0 0 1 54 693 Tm (rms stays around 0.35) Tj
+1 0 0 1 54 678 Tm () Tj
+1 0 0 1 54 663 Tm (peak stays around 0.50) Tj
 1 0 0 1 54 648 Tm () Tj
-1 0 0 1 54 633 Tm (Expected results:) Tj
+1 0 0 1 54 633 Tm (silent_chunks=0) Tj
 1 0 0 1 54 618 Tm () Tj
-1 0 0 1 54 603 Tm (chunks_received rises continuously) Tj
+1 0 0 1 54 603 Tm (clipped_chunks=0) Tj
 1 0 0 1 54 588 Tm () Tj
-1 0 0 1 54 573 Tm (chunks_dropped=0 under normal conditions) Tj
+1 0 0 1 54 573 Tm (feature_frames_processed rises with each processed chunk) Tj
 1 0 0 1 54 558 Tm () Tj
-1 0 0 1 54 543 Tm (silent_chunks rises in a quiet room) Tj
+1 0 0 1 54 543 Tm (Manual Microphone Runtime Test) Tj
 1 0 0 1 54 528 Tm () Tj
-1 0 0 1 54 513 Tm (rms and peak rise when speaking) Tj
-1 0 0 1 54 498 Tm () Tj
-1 0 0 1 54 483 Tm (clipped_chunks stays low unless the input is too hot) Tj
+1 0 0 1 54 513 Tm (.venv/bin/python -c "import sounddevice as sd; print\(sd.query_devices\(\)\)") Tj
+1 0 0 1 54 498 Tm (.venv/bin/python -m lyrics_aligner.main --audio-source microphone --input-device "Built-in) Tj
+1 0 0 1 54 483 Tm (Microphone") Tj
 1 0 0 1 54 468 Tm () Tj
-1 0 0 1 54 453 Tm (Manual ONNX Extractor Wiring Test) Tj
+1 0 0 1 54 453 Tm (Expected results:) Tj
 1 0 0 1 54 438 Tm () Tj
-1 0 0 1 54 423 Tm (.venv/bin/python -m lyrics_aligner.main \\) Tj
-1 0 0 1 54 408 Tm (  --audio-source simulated \\) Tj
-1 0 0 1 54 393 Tm (  --feature-extractor onnx \\) Tj
-1 0 0 1 54 378 Tm (  --feature-model-path /absolute/path/to/model.onnx) Tj
-1 0 0 1 54 363 Tm () Tj
-1 0 0 1 54 348 Tm (Expected results:) Tj
-1 0 0 1 54 333 Tm () Tj
-1 0 0 1 54 318 Tm (the process starts without feature-extractor configuration errors) Tj
-1 0 0 1 54 303 Tm () Tj
-1 0 0 1 54 288 Tm (feature_frames_processed rises when the model returns valid output) Tj
-1 0 0 1 54 273 Tm () Tj
-1 0 0 1 54 258 Tm (invalid_inference_outputs stays low for a healthy model) Tj
-1 0 0 1 54 243 Tm () Tj
-1 0 0 1 54 228 Tm (What A Passing Sprint Looks Like) Tj
-1 0 0 1 54 213 Tm () Tj
-1 0 0 1 54 198 Tm (simulated mode runs without dropped chunks) Tj
+1 0 0 1 54 423 Tm (chunks_received rises continuously) Tj
+1 0 0 1 54 408 Tm () Tj
+1 0 0 1 54 393 Tm (chunks_dropped=0 under normal conditions) Tj
+1 0 0 1 54 378 Tm () Tj
+1 0 0 1 54 363 Tm (silent_chunks rises in a quiet room) Tj
+1 0 0 1 54 348 Tm () Tj
+1 0 0 1 54 333 Tm (rms and peak rise when speaking) Tj
+1 0 0 1 54 318 Tm () Tj
+1 0 0 1 54 303 Tm (clipped_chunks stays low unless the input is too hot) Tj
+1 0 0 1 54 288 Tm () Tj
+1 0 0 1 54 273 Tm (Manual ONNX Extractor Wiring Test) Tj
+1 0 0 1 54 258 Tm () Tj
+1 0 0 1 54 243 Tm (.venv/bin/python -m lyrics_aligner.main \\) Tj
+1 0 0 1 54 228 Tm (  --audio-source simulated \\) Tj
+1 0 0 1 54 213 Tm (  --feature-extractor onnx \\) Tj
+1 0 0 1 54 198 Tm (  --feature-model-path /absolute/path/to/model.onnx) Tj
 1 0 0 1 54 183 Tm () Tj
-1 0 0 1 54 168 Tm (microphone mode captures real input and reacts to silence/speech) Tj
+1 0 0 1 54 168 Tm (Expected results:) Tj
 1 0 0 1 54 153 Tm () Tj
-1 0 0 1 54 138 Tm (the queue stays bounded without backlog growth) Tj
+1 0 0 1 54 138 Tm (the process starts without feature-extractor configuration errors) Tj
 1 0 0 1 54 123 Tm () Tj
-1 0 0 1 54 108 Tm (quality checks pass) Tj
+1 0 0 1 54 108 Tm (feature_frames_processed rises when the model returns valid output) Tj
 1 0 0 1 54 93 Tm () Tj
-1 0 0 1 54 78 Tm (the walkthrough PDF is regenerated and checked in) Tj
+1 0 0 1 54 78 Tm (invalid_inference_outputs stays low for a healthy model) Tj
 ET
 endstream
 endobj
@@ -849,27 +849,39 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 35 0 R >> >> /Contents 34 0 R >>
 endobj
 34 0 obj
-<< /Length 940 >>
+<< /Length 1480 >>
 stream
 BT
 /F1 11 Tf
 1 0 0 1 54 738 Tm () Tj
-1 0 0 1 54 723 Tm (24. Final Takeaway) Tj
-1 0 0 1 54 708 Tm (The current code is a well-structured real-time ingestion skeleton:) Tj
-1 0 0 1 54 693 Tm () Tj
-1 0 0 1 54 678 Tm (configuration comes in through config/env/CLI) Tj
-1 0 0 1 54 663 Tm () Tj
-1 0 0 1 54 648 Tm (an adapter yields AudioChunk objects) Tj
-1 0 0 1 54 633 Tm () Tj
-1 0 0 1 54 618 Tm (the runtime protects itself with a bounded queue) Tj
-1 0 0 1 54 603 Tm () Tj
-1 0 0 1 54 588 Tm (processing currently means diagnostics plus feature extraction, not alignment) Tj
-1 0 0 1 54 573 Tm () Tj
-1 0 0 1 54 558 Tm (metrics and logging show whether the ingestion path behaves correctly) Tj
-1 0 0 1 54 543 Tm () Tj
-1 0 0 1 54 528 Tm (Once you understand that, the rest of the future system is easier to imagine: alignment plus) Tj
-1 0 0 1 54 513 Tm (slide decisions will sit downstream of the same runtime backbone.) Tj
-1 0 0 1 54 498 Tm () Tj
+1 0 0 1 54 723 Tm (What A Passing Sprint Looks Like) Tj
+1 0 0 1 54 708 Tm () Tj
+1 0 0 1 54 693 Tm (simulated mode runs without dropped chunks) Tj
+1 0 0 1 54 678 Tm () Tj
+1 0 0 1 54 663 Tm (microphone mode captures real input and reacts to silence/speech) Tj
+1 0 0 1 54 648 Tm () Tj
+1 0 0 1 54 633 Tm (the queue stays bounded without backlog growth) Tj
+1 0 0 1 54 618 Tm () Tj
+1 0 0 1 54 603 Tm (quality checks pass) Tj
+1 0 0 1 54 588 Tm () Tj
+1 0 0 1 54 573 Tm (the walkthrough PDF is regenerated and checked in) Tj
+1 0 0 1 54 558 Tm () Tj
+1 0 0 1 54 543 Tm (24. Final Takeaway) Tj
+1 0 0 1 54 528 Tm (The current code is a well-structured real-time ingestion skeleton:) Tj
+1 0 0 1 54 513 Tm () Tj
+1 0 0 1 54 498 Tm (configuration comes in through config/env/CLI) Tj
+1 0 0 1 54 483 Tm () Tj
+1 0 0 1 54 468 Tm (an adapter yields AudioChunk objects) Tj
+1 0 0 1 54 453 Tm () Tj
+1 0 0 1 54 438 Tm (the runtime protects itself with a bounded queue) Tj
+1 0 0 1 54 423 Tm () Tj
+1 0 0 1 54 408 Tm (processing currently means diagnostics plus feature extraction, not alignment) Tj
+1 0 0 1 54 393 Tm () Tj
+1 0 0 1 54 378 Tm (metrics and logging show whether the ingestion path behaves correctly) Tj
+1 0 0 1 54 363 Tm () Tj
+1 0 0 1 54 348 Tm (Once you understand that, the rest of the future system is easier to imagine: alignment plus) Tj
+1 0 0 1 54 333 Tm (slide decisions will sit downstream of the same runtime backbone.) Tj
+1 0 0 1 54 318 Tm () Tj
 ET
 endstream
 endobj
@@ -883,39 +895,39 @@ xref
 0000000058 00000 n 
 0000000218 00000 n 
 0000000345 00000 n 
-0000003935 00000 n 
-0000004062 00000 n 
-0000006076 00000 n 
-0000006203 00000 n 
-0000008795 00000 n 
-0000008923 00000 n 
-0000011333 00000 n 
-0000011462 00000 n 
-0000013957 00000 n 
-0000014086 00000 n 
-0000016353 00000 n 
-0000016482 00000 n 
-0000018757 00000 n 
-0000018886 00000 n 
-0000021301 00000 n 
-0000021430 00000 n 
-0000023768 00000 n 
-0000023897 00000 n 
-0000026076 00000 n 
-0000026205 00000 n 
-0000028331 00000 n 
-0000028460 00000 n 
-0000031107 00000 n 
-0000031236 00000 n 
-0000033787 00000 n 
-0000033916 00000 n 
-0000036098 00000 n 
-0000036227 00000 n 
-0000038429 00000 n 
-0000038558 00000 n 
-0000039550 00000 n 
+0000004002 00000 n 
+0000004129 00000 n 
+0000006167 00000 n 
+0000006294 00000 n 
+0000008833 00000 n 
+0000008961 00000 n 
+0000011492 00000 n 
+0000011621 00000 n 
+0000013997 00000 n 
+0000014126 00000 n 
+0000016536 00000 n 
+0000016665 00000 n 
+0000018968 00000 n 
+0000019097 00000 n 
+0000021324 00000 n 
+0000021453 00000 n 
+0000023890 00000 n 
+0000024019 00000 n 
+0000026393 00000 n 
+0000026522 00000 n 
+0000028508 00000 n 
+0000028637 00000 n 
+0000031167 00000 n 
+0000031296 00000 n 
+0000034038 00000 n 
+0000034167 00000 n 
+0000036449 00000 n 
+0000036578 00000 n 
+0000038689 00000 n 
+0000038818 00000 n 
+0000040351 00000 n 
 trailer
 << /Size 36 /Root 1 0 R >>
 startxref
-39621
+40422
 %%EOF

@@ -35,6 +35,9 @@ class AppConfig:
     feature_extractor: str = "simulated"
     reference_profile_path: str | None = None
     match_confidence_threshold: float = 0.6
+    match_max_forward_jump_frames: int = 4
+    match_large_jump_threshold_frames: int = 2
+    match_confirmation_count: int = 2
     sample_rate: int = 16_000
     channels: int = 1
     block_size: int = 4_096
@@ -58,6 +61,18 @@ class AppConfig:
             match_confidence_threshold=_read_float(
                 "LYRICS_ALIGNER_MATCH_CONFIDENCE_THRESHOLD",
                 0.6,
+            ),
+            match_max_forward_jump_frames=_read_int(
+                "LYRICS_ALIGNER_MATCH_MAX_FORWARD_JUMP_FRAMES",
+                4,
+            ),
+            match_large_jump_threshold_frames=_read_int(
+                "LYRICS_ALIGNER_MATCH_LARGE_JUMP_THRESHOLD_FRAMES",
+                2,
+            ),
+            match_confirmation_count=_read_int(
+                "LYRICS_ALIGNER_MATCH_CONFIRMATION_COUNT",
+                2,
             ),
             sample_rate=_read_int("LYRICS_ALIGNER_SAMPLE_RATE", 16_000),
             channels=_read_int("LYRICS_ALIGNER_CHANNELS", 1),
