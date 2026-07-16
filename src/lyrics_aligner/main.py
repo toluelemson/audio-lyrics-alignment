@@ -13,13 +13,19 @@ from lyrics_aligner.adapters.features import (
     SimulatedFeatureExtractor,
     SimulatedFeatureExtractorConfig,
 )
+from lyrics_aligner.adapters.matching import (
+    NearestNeighborFeatureMatcher,
+    NearestNeighborFeatureMatcherConfig,
+)
 from lyrics_aligner.adapters.reference_profiles import (
     FilesystemReferenceProfileRepository,
 )
 from lyrics_aligner.application import AudioIngestionRuntime
 from lyrics_aligner.config import AppConfig
+from lyrics_aligner.domain.models import ReferenceProfile
 from lyrics_aligner.ports.audio_source import AudioSource
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
+from lyrics_aligner.ports.feature_matcher import FeatureMatcher
 from lyrics_aligner.ports.reference_profile_repository import (
     ReferenceProfileRepository,
 )
@@ -67,6 +73,20 @@ def _build_reference_profile_repository() -> ReferenceProfileRepository:
     return FilesystemReferenceProfileRepository()
 
 
+def _build_feature_matcher(
+    config: AppConfig,
+    profile: ReferenceProfile | None,
+) -> FeatureMatcher | None:
+    if profile is None:
+        return None
+    return NearestNeighborFeatureMatcher(
+        profile,
+        NearestNeighborFeatureMatcherConfig(
+            confidence_threshold=config.match_confidence_threshold,
+        ),
+    )
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the audio-to-lyrics ingestion runtime.",
@@ -98,6 +118,11 @@ def _parse_args() -> argparse.Namespace:
         "--reference-profile-path",
         help="Path to a prepared reference profile directory.",
     )
+    parser.add_argument(
+        "--match-confidence-threshold",
+        type=float,
+        help="Confidence threshold used to accept feature matches.",
+    )
     return parser.parse_args()
 
 
@@ -108,11 +133,17 @@ def _config_from_args(args: argparse.Namespace) -> AppConfig:
         input_device = int(args.input_device) if args.input_device.isdigit() else args.input_device
     feature_model_path = args.feature_model_path or config.feature_model_path
     reference_profile_path = args.reference_profile_path or config.reference_profile_path
+    match_confidence_threshold = (
+        args.match_confidence_threshold
+        if args.match_confidence_threshold is not None
+        else config.match_confidence_threshold
+    )
 
     return AppConfig(
         audio_source=args.audio_source or config.audio_source,
         feature_extractor=args.feature_extractor or config.feature_extractor,
         reference_profile_path=reference_profile_path,
+        match_confidence_threshold=match_confidence_threshold,
         sample_rate=config.sample_rate,
         channels=config.channels,
         block_size=config.block_size,
@@ -140,6 +171,7 @@ def main() -> None:
     )
     config = _config_from_args(_parse_args())
     logger = logging.getLogger(__name__)
+    profile: ReferenceProfile | None = None
     if config.reference_profile_path is not None:
         repository = _build_reference_profile_repository()
         profile = repository.load(config.reference_profile_path)
@@ -151,11 +183,13 @@ def main() -> None:
         )
     source = _build_audio_source(config)
     feature_extractor = _build_feature_extractor(config)
+    feature_matcher = _build_feature_matcher(config, profile)
     runtime = AudioIngestionRuntime(
         source=source,
         queue_capacity=config.audio_queue_capacity,
         logger=logger,
         feature_extractor=feature_extractor,
+        feature_matcher=feature_matcher,
         diagnostics_interval_seconds=config.diagnostics_interval_seconds,
         device_name=getattr(source, "device_name", source.__class__.__name__),
         silence_threshold_rms=config.silence_threshold_rms,
@@ -166,7 +200,8 @@ def main() -> None:
     logger.info(
         "Audio ingestion finished source=%s feature_extractor=%s sample_rate=%s block_size=%s "
         "chunks_received=%s chunks_dropped=%s silent_chunks=%s "
-        "clipped_chunks=%s feature_frames_processed=%s queue_high_water_mark=%s",
+        "clipped_chunks=%s feature_frames_processed=%s accepted_matches=%s "
+        "low_confidence_matches=%s queue_high_water_mark=%s",
         config.audio_source,
         config.feature_extractor,
         config.sample_rate,
@@ -176,6 +211,8 @@ def main() -> None:
         report.metrics.silent_chunks,
         report.metrics.clipped_chunks,
         report.metrics.feature_frames_processed,
+        report.metrics.accepted_matches,
+        report.metrics.low_confidence_matches,
         report.metrics.queue_high_water_mark,
     )
 

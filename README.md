@@ -57,12 +57,23 @@ With a prepared reference profile directory:
   --reference-profile-path /absolute/path/to/reference-profile
 ```
 
+With baseline matching against the loaded reference profile:
+
+```bash
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor simulated \
+  --reference-profile-path /absolute/path/to/reference-profile \
+  --match-confidence-threshold 0.6
+```
+
 Relevant runtime selectors:
 
 - `--audio-source simulated|microphone`
 - `--feature-extractor simulated|onnx`
 - `--feature-model-path /absolute/path/to/model.onnx` when using `onnx`
 - `--reference-profile-path /absolute/path/to/reference-profile`
+- `--match-confidence-threshold 0.0-1.0`
 
 Microphone input:
 
@@ -84,6 +95,7 @@ Feature extraction can also be configured with environment variables:
 export LYRICS_ALIGNER_FEATURE_EXTRACTOR=onnx
 export LYRICS_ALIGNER_FEATURE_MODEL_PATH=/absolute/path/to/model.onnx
 export LYRICS_ALIGNER_REFERENCE_PROFILE_PATH=/absolute/path/to/reference-profile
+export LYRICS_ALIGNER_MATCH_CONFIDENCE_THRESHOLD=0.6
 .venv/bin/python -m lyrics_aligner.main --audio-source simulated
 ```
 
@@ -193,6 +205,23 @@ Expected behavior:
 - the log reports the profile name and frame count
 - runtime then continues with normal audio ingestion and feature extraction
 
+Manual baseline matching test:
+
+```bash
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor simulated \
+  --reference-profile-path /tmp/reference-profile \
+  --match-confidence-threshold 0.2 \
+  --simulation-duration-seconds 1.0
+```
+
+Expected behavior:
+
+- diagnostics include `accepted_matches` and `low_confidence_matches`
+- `last_reference_timestamp` changes from `none` once matching begins
+- the final summary includes match counts
+
 ## Documentation
 
 Documentation is expected to move with the code.
@@ -217,7 +246,9 @@ The current code also includes the first Sprint 2 vertical slice:
 - deterministic feature extraction from `AudioChunk` to `FeatureFrame`
 - ONNX-backed feature extraction behind the same `FeatureExtractor` port
 - filesystem-backed loading of prepared reference profiles
+- nearest-neighbor matching from live feature frames to reference frames
 - runtime accounting for `feature_frames_processed`
 - invalid feature frame detection via `invalid_inference_outputs`
+- match accounting via `accepted_matches` and `low_confidence_matches`
 
-Alignment, live-to-reference comparison, and slide decisions are still follow-up work.
+Slide decisions, match smoothing, and OSC triggering are still follow-up work.

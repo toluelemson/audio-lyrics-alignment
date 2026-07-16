@@ -4,8 +4,12 @@ import numpy as np
 import pytest
 
 from lyrics_aligner.adapters.audio.simulated import SimulatedAudioConfig, SimulatedAudioSource
+from lyrics_aligner.adapters.matching import (
+    NearestNeighborFeatureMatcher,
+    NearestNeighborFeatureMatcherConfig,
+)
 from lyrics_aligner.application.runtime import AudioIngestionRuntime, BoundedAudioQueue
-from lyrics_aligner.domain.models import FeatureFrame
+from lyrics_aligner.domain.models import FeatureFrame, ReferenceProfile
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 
 
@@ -54,6 +58,7 @@ def test_runtime_consumes_simulated_audio_and_returns_metrics(
     assert report.metrics.feature_frames_processed == 0
     assert report.metrics.queue_high_water_mark >= 1
     assert report.queue_size == 0
+    assert report.last_match is None
     assert report.peak == pytest.approx(0.25, rel=0.05)
     assert report.rms > 0
     assert "device=SimulatedAudioSource" in caplog.text
@@ -129,3 +134,105 @@ def test_runtime_counts_processed_and_invalid_feature_frames() -> None:
     assert report.metrics.chunks_received == 2
     assert report.metrics.feature_frames_processed == 2
     assert report.metrics.invalid_inference_outputs == 2
+
+
+def test_runtime_counts_accepted_and_low_confidence_matches() -> None:
+    extractor: FeatureExtractor = StubFeatureExtractor()
+    profile = ReferenceProfile(
+        name="song-a",
+        frames=(
+            FeatureFrame(
+                values=np.array([0.1, 0.2], dtype=np.float32),
+                observed_at=0.0,
+                frame_duration_seconds=0.01,
+            ),
+            FeatureFrame(
+                values=np.array([1.0, 1.0], dtype=np.float32),
+                observed_at=0.25,
+                frame_duration_seconds=0.01,
+            ),
+        ),
+        metadata={},
+    )
+    matcher = NearestNeighborFeatureMatcher(
+        profile,
+        NearestNeighborFeatureMatcherConfig(confidence_threshold=0.9),
+    )
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.02,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-matches"),
+        feature_extractor=extractor,
+        feature_matcher=matcher,
+        diagnostics_interval_seconds=1.0,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.feature_frames_processed == 2
+    assert report.metrics.accepted_matches == 2
+    assert report.metrics.low_confidence_matches == 0
+    assert report.last_match is not None
+    assert report.last_match.reference_frame == 0
+
+
+class LowConfidenceFeatureExtractor:
+    def extract(self, chunk: object) -> list[FeatureFrame]:
+        del chunk
+        return [
+            FeatureFrame(
+                values=np.array([0.7, 0.7], dtype=np.float32),
+                observed_at=1.0,
+                frame_duration_seconds=0.01,
+            )
+        ]
+
+
+def test_runtime_counts_low_confidence_matches() -> None:
+    extractor: FeatureExtractor = LowConfidenceFeatureExtractor()
+    profile = ReferenceProfile(
+        name="song-a",
+        frames=(
+            FeatureFrame(
+                values=np.array([0.1, 0.2], dtype=np.float32),
+                observed_at=0.0,
+                frame_duration_seconds=0.01,
+            ),
+        ),
+        metadata={},
+    )
+    matcher = NearestNeighborFeatureMatcher(
+        profile,
+        NearestNeighborFeatureMatcherConfig(confidence_threshold=0.95),
+    )
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.01,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-low-confidence"),
+        feature_extractor=extractor,
+        feature_matcher=matcher,
+        diagnostics_interval_seconds=1.0,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.accepted_matches == 0
+    assert report.metrics.low_confidence_matches == 1
+    assert report.last_match is not None
+    assert report.last_match.valid is False

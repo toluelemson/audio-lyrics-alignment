@@ -9,9 +9,10 @@ from time import monotonic
 import numpy as np
 
 from lyrics_aligner.application.metrics import RuntimeMetrics
-from lyrics_aligner.domain.models import AudioChunk, FeatureFrame
+from lyrics_aligner.domain.models import AudioChunk, FeatureFrame, MatchResult
 from lyrics_aligner.ports.audio_source import AudioSource
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
+from lyrics_aligner.ports.feature_matcher import FeatureMatcher
 
 
 class BoundedAudioQueue:
@@ -74,6 +75,7 @@ class RuntimeReport:
     peak: float
     queue_size: int
     queue_capacity: int
+    last_match: MatchResult | None
 
 
 class AudioIngestionRuntime:
@@ -85,6 +87,7 @@ class AudioIngestionRuntime:
         queue_capacity: int,
         logger: logging.Logger,
         feature_extractor: FeatureExtractor | None = None,
+        feature_matcher: FeatureMatcher | None = None,
         diagnostics_interval_seconds: float = 0.5,
         device_name: str = "SimulatedAudioSource",
         silence_threshold_rms: float = 0.01,
@@ -94,6 +97,7 @@ class AudioIngestionRuntime:
         self._queue = BoundedAudioQueue(queue_capacity)
         self._logger = logger
         self._feature_extractor = feature_extractor
+        self._feature_matcher = feature_matcher
         self._diagnostics_interval_seconds = diagnostics_interval_seconds
         self._device_name = device_name
         self._silence_threshold_rms = silence_threshold_rms
@@ -103,6 +107,7 @@ class AudioIngestionRuntime:
         self._stop_requested = Event()
         self._last_rms = 0.0
         self._last_peak = 0.0
+        self._last_match: MatchResult | None = None
 
     def run(self) -> RuntimeReport:
         producer = Thread(target=self._produce, name="audio-producer", daemon=True)
@@ -130,6 +135,7 @@ class AudioIngestionRuntime:
             peak=self._last_peak,
             queue_size=self._queue.qsize(),
             queue_capacity=self._queue.capacity,
+            last_match=self._last_match,
         )
 
     def stop(self) -> None:
@@ -173,7 +179,9 @@ class AudioIngestionRuntime:
         self._logger.info(
             "device=%s rms=%.2f peak=%.2f queue=%s/%s "
             "chunks_received=%s chunks_dropped=%s "
-            "silent_chunks=%s clipped_chunks=%s feature_frames_processed=%s",
+            "silent_chunks=%s clipped_chunks=%s feature_frames_processed=%s "
+            "accepted_matches=%s low_confidence_matches=%s "
+            "last_reference_timestamp=%s last_confidence=%.2f",
             self._device_name,
             self._last_rms,
             self._last_peak,
@@ -184,6 +192,14 @@ class AudioIngestionRuntime:
             metrics.silent_chunks,
             metrics.clipped_chunks,
             metrics.feature_frames_processed,
+            metrics.accepted_matches,
+            metrics.low_confidence_matches,
+            (
+                f"{self._last_match.reference_timestamp:.2f}"
+                if self._last_match is not None
+                else "none"
+            ),
+            self._last_match.confidence if self._last_match is not None else 0.0,
         )
 
     def _record_feature_frames(self, frames: list[FeatureFrame]) -> None:
@@ -195,10 +211,20 @@ class AudioIngestionRuntime:
                 invalid_frames += 1
                 continue
             valid_frames += 1
+            if self._feature_matcher is not None:
+                self._record_match(self._feature_matcher.match(frame))
 
         with self._metrics_lock:
             self._metrics.feature_frames_processed += valid_frames
             self._metrics.invalid_inference_outputs += invalid_frames
+
+    def _record_match(self, result: MatchResult) -> None:
+        self._last_match = result
+        with self._metrics_lock:
+            if result.valid:
+                self._metrics.accepted_matches += 1
+            else:
+                self._metrics.low_confidence_matches += 1
 
     def _snapshot_metrics(self) -> RuntimeMetrics:
         with self._metrics_lock:
