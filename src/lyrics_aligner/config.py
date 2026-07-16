@@ -33,6 +33,7 @@ def _read_optional_device(name: str) -> str | int | None:
 class AppConfig:
     audio_source: str = "simulated"
     feature_extractor: str = "simulated"
+    reference_profile_path: str | None = None
     sample_rate: int = 16_000
     channels: int = 1
     block_size: int = 4_096
@@ -52,6 +53,7 @@ class AppConfig:
         return cls(
             audio_source=_read_str("LYRICS_ALIGNER_AUDIO_SOURCE", "simulated"),
             feature_extractor=_read_str("LYRICS_ALIGNER_FEATURE_EXTRACTOR", "simulated"),
+            reference_profile_path=os.getenv("LYRICS_ALIGNER_REFERENCE_PROFILE_PATH"),
             sample_rate=_read_int("LYRICS_ALIGNER_SAMPLE_RATE", 16_000),
             channels=_read_int("LYRICS_ALIGNER_CHANNELS", 1),
             block_size=_read_int("LYRICS_ALIGNER_BLOCK_SIZE", 4_096),

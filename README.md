@@ -47,11 +47,22 @@ ONNX feature extraction:
   --feature-model-path /absolute/path/to/model.onnx
 ```
 
+With a prepared reference profile directory:
+
+```bash
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor onnx \
+  --feature-model-path /absolute/path/to/model.onnx \
+  --reference-profile-path /absolute/path/to/reference-profile
+```
+
 Relevant runtime selectors:
 
 - `--audio-source simulated|microphone`
 - `--feature-extractor simulated|onnx`
 - `--feature-model-path /absolute/path/to/model.onnx` when using `onnx`
+- `--reference-profile-path /absolute/path/to/reference-profile`
 
 Microphone input:
 
@@ -72,8 +83,15 @@ Feature extraction can also be configured with environment variables:
 ```bash
 export LYRICS_ALIGNER_FEATURE_EXTRACTOR=onnx
 export LYRICS_ALIGNER_FEATURE_MODEL_PATH=/absolute/path/to/model.onnx
+export LYRICS_ALIGNER_REFERENCE_PROFILE_PATH=/absolute/path/to/reference-profile
 .venv/bin/python -m lyrics_aligner.main --audio-source simulated
 ```
+
+Prepared reference profile directory contents:
+
+- `profile.json`: profile name, frame duration, and optional timestamps
+- `reference_features.npy`: 2D NumPy array of reference feature vectors
+- `metadata.json`: optional extra labels for future matching and presentation steps
 
 ## Testing The Current Sprint
 
@@ -139,6 +157,42 @@ Expected behavior:
 - `feature_frames_processed` rises when the model returns valid frames
 - `invalid_inference_outputs` stays at `0` for a healthy model output
 
+Manual reference profile loading test:
+
+```bash
+mkdir -p /tmp/reference-profile
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+import numpy as np
+
+base = Path("/tmp/reference-profile")
+np.save(base / "reference_features.npy", np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32))
+(base / "profile.json").write_text(
+    json.dumps(
+        {
+            "name": "demo-song",
+            "frame_duration_seconds": 0.25,
+            "timestamps_seconds": [0.0, 0.25],
+        }
+    ),
+    encoding="utf-8",
+)
+(base / "metadata.json").write_text(json.dumps({"song": "Demo Song"}), encoding="utf-8")
+PY
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor simulated \
+  --reference-profile-path /tmp/reference-profile \
+  --simulation-duration-seconds 1.0
+```
+
+Expected behavior:
+
+- startup logs `Loaded reference profile`
+- the log reports the profile name and frame count
+- runtime then continues with normal audio ingestion and feature extraction
+
 ## Documentation
 
 Documentation is expected to move with the code.
@@ -162,7 +216,8 @@ The current code also includes the first Sprint 2 vertical slice:
 
 - deterministic feature extraction from `AudioChunk` to `FeatureFrame`
 - ONNX-backed feature extraction behind the same `FeatureExtractor` port
+- filesystem-backed loading of prepared reference profiles
 - runtime accounting for `feature_frames_processed`
 - invalid feature frame detection via `invalid_inference_outputs`
 
-Alignment and slide decisions are still follow-up work.
+Alignment, live-to-reference comparison, and slide decisions are still follow-up work.

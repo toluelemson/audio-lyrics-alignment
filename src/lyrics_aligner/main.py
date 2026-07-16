@@ -13,10 +13,16 @@ from lyrics_aligner.adapters.features import (
     SimulatedFeatureExtractor,
     SimulatedFeatureExtractorConfig,
 )
+from lyrics_aligner.adapters.reference_profiles import (
+    FilesystemReferenceProfileRepository,
+)
 from lyrics_aligner.application import AudioIngestionRuntime
 from lyrics_aligner.config import AppConfig
 from lyrics_aligner.ports.audio_source import AudioSource
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
+from lyrics_aligner.ports.reference_profile_repository import (
+    ReferenceProfileRepository,
+)
 
 
 def _build_audio_source(config: AppConfig) -> AudioSource:
@@ -57,6 +63,10 @@ def _build_feature_extractor(config: AppConfig) -> FeatureExtractor:
     raise ValueError(f"Unsupported feature_extractor: {config.feature_extractor}")
 
 
+def _build_reference_profile_repository() -> ReferenceProfileRepository:
+    return FilesystemReferenceProfileRepository()
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the audio-to-lyrics ingestion runtime.",
@@ -84,6 +94,10 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         help="Simulated audio duration when using the simulated source.",
     )
+    parser.add_argument(
+        "--reference-profile-path",
+        help="Path to a prepared reference profile directory.",
+    )
     return parser.parse_args()
 
 
@@ -93,10 +107,12 @@ def _config_from_args(args: argparse.Namespace) -> AppConfig:
     if args.input_device is not None:
         input_device = int(args.input_device) if args.input_device.isdigit() else args.input_device
     feature_model_path = args.feature_model_path or config.feature_model_path
+    reference_profile_path = args.reference_profile_path or config.reference_profile_path
 
     return AppConfig(
         audio_source=args.audio_source or config.audio_source,
         feature_extractor=args.feature_extractor or config.feature_extractor,
+        reference_profile_path=reference_profile_path,
         sample_rate=config.sample_rate,
         channels=config.channels,
         block_size=config.block_size,
@@ -124,6 +140,15 @@ def main() -> None:
     )
     config = _config_from_args(_parse_args())
     logger = logging.getLogger(__name__)
+    if config.reference_profile_path is not None:
+        repository = _build_reference_profile_repository()
+        profile = repository.load(config.reference_profile_path)
+        logger.info(
+            "Loaded reference profile name=%s frames=%s path=%s",
+            profile.name,
+            len(profile.frames),
+            config.reference_profile_path,
+        )
     source = _build_audio_source(config)
     feature_extractor = _build_feature_extractor(config)
     runtime = AudioIngestionRuntime(

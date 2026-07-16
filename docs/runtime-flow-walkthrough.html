@@ -104,16 +104,18 @@
       This document explains the code as it exists today. It focuses on the
       working runtime path, not the full future product vision. The current
       codebase is an audio ingestion, diagnostics, and deterministic feature
-      extraction pipeline with an ONNX-backed extractor path. It does not yet
-      perform alignment, slide resolution, or OSC output.
+      extraction pipeline with an ONNX-backed extractor path plus prepared
+      reference profile loading. It does not yet perform alignment, slide
+      resolution, or OSC output.
     </p>
 
     <div class="callout">
       <strong>Current truth:</strong> the code already captures or simulates
       audio, pushes chunks through a bounded queue, computes basic signal
       diagnostics, extracts feature frames through either a deterministic or
-      ONNX-backed extractor, and logs metrics. The “lyrics alignment” parts are
-      still mostly planned types and interfaces, not runtime behavior yet.
+      ONNX-backed extractor, load a prepared reference profile, and log
+      metrics. The “lyrics alignment” parts are still mostly planned types and
+      interfaces, not runtime behavior yet.
     </div>
 
     <h2>1. Fast Summary</h2>
@@ -145,7 +147,10 @@
   compute RMS / peak / silence / clipping
         |
         v
-  deterministic feature extraction
+  deterministic or ONNX feature extraction
+        |
+        v
+  optional reference profile load at startup
         |
         v
   RuntimeMetrics + log output + RuntimeReport</pre>
@@ -162,6 +167,7 @@
       <li><span class="file-ref">src/lyrics_aligner/adapters/audio/microphone.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/features/simulated.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/features/onnx_runtime.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/reference_profiles/filesystem.py</span></li>
     </ol>
 
     <h2>3. Package-Level Mental Model</h2>
@@ -169,15 +175,17 @@
       <div class="card">
         <h3>domain</h3>
         <p>
-          Pure data structures and future business concepts. Today the main
-          active domain type is <code>AudioChunk</code>.
+          Pure data structures and future business concepts. Today the active
+          domain types include <code>AudioChunk</code>,
+          <code>FeatureFrame</code>, and <code>ReferenceProfile</code>.
         </p>
       </div>
       <div class="card">
         <h3>ports</h3>
         <p>
-          Abstract contracts. The runtime depends on <code>AudioSource</code>,
-          not on a concrete adapter.
+          Abstract contracts. The runtime depends on ports like
+          <code>AudioSource</code>, <code>FeatureExtractor</code>, and
+          <code>ReferenceProfileRepository</code>, not on concrete adapters.
         </p>
       </div>
       <div class="card">
@@ -185,7 +193,7 @@
         <p>
           Concrete implementations. Right now there are simulated and microphone
           audio adapters plus deterministic and ONNX-backed feature extractor
-          adapters.
+          adapters and a filesystem-backed reference profile adapter.
         </p>
       </div>
       <div class="card">
@@ -208,6 +216,7 @@
       <li>load environment-driven configuration</li>
       <li>construct the selected audio source</li>
       <li>construct the selected feature extractor</li>
+      <li>optionally load the selected reference profile directory</li>
       <li>construct the runtime</li>
       <li>run the runtime and log the final summary</li>
     </ul>
@@ -221,6 +230,7 @@
     <ol>
       <li><code>_parse_args()</code> reads CLI flags.</li>
       <li><code>_config_from_args()</code> merges CLI args with env-based defaults.</li>
+      <li>If configured, the reference profile repository loads prepared profile artifacts from disk.</li>
       <li><code>_build_audio_source()</code> returns an <code>AudioSource</code>.</li>
       <li><code>_build_feature_extractor()</code> returns a <code>FeatureExtractor</code>.</li>
       <li><code>AudioIngestionRuntime(...)</code> is created.</li>
@@ -245,6 +255,7 @@
     <ul>
       <li><code>audio_source</code>: selects <code>simulated</code> or <code>microphone</code></li>
       <li><code>feature_extractor</code>: selects <code>simulated</code> or <code>onnx</code></li>
+      <li><code>reference_profile_path</code>: directory containing prepared reference features and metadata</li>
       <li><code>sample_rate</code>: audio sampling frequency</li>
       <li><code>channels</code>: currently expected to be mono for the main path</li>
       <li><code>block_size</code>: samples per chunk</li>

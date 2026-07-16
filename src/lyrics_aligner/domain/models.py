@@ -21,6 +21,13 @@ class FeatureFrame:
 
 
 @dataclass(frozen=True, slots=True)
+class ReferenceProfile:
+    name: str
+    frames: tuple[FeatureFrame, ...]
+    metadata: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
 class MatchResult:
     reference_frame: int
     reference_timestamp: float
