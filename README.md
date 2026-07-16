@@ -152,6 +152,33 @@ The builder:
 - validates slide timestamps
 - writes `profile.json`, `reference_features.npy`, and `metadata.json`
 
+## Sprint 4 Offline Alignment
+
+Compare a recorded performance against a saved reference profile:
+
+```bash
+python tools/offline_align.py \
+  --live-audio amazing-grace-live.wav \
+  --reference-profile profiles/amazing-grace
+```
+
+Optional selectors:
+
+- `--feature-extractor simulated|onnx`
+- `--feature-model-path /absolute/path/to/model.onnx` when using `onnx`
+- `--method baseline|subsequence`
+- `--metric cosine|euclidean`
+- `--expected-alignments expected-timestamps.json`
+
+The offline alignment tool:
+
+- extracts feature frames from a recorded WAV file
+- compares them against the saved reference profile
+- supports baseline DTW and subsequence DTW
+- calculates normalized path cost and confidence
+- prints timestamp estimates
+- optionally reports alignment error against expected timestamp fixtures
+
 ## Testing The Current Sprint
 
 Quality checks:
@@ -335,6 +362,23 @@ Expected behavior:
 - `profiles/amazing-grace/metadata.json` is created
 - rerunning the command with the same inputs produces the same feature shape
 
+Manual Sprint 4 offline alignment test:
+
+```bash
+python tools/offline_align.py \
+  --live-audio amazing-grace-live.wav \
+  --reference-profile profiles/amazing-grace \
+  --method subsequence \
+  --metric cosine
+```
+
+Expected behavior:
+
+- the command prints a `Live mm:ss.xx -> Reference mm:ss.xx` estimate
+- it prints a confidence value
+- it prints a JSON summary with normalized path cost
+- repeated runs on the same inputs produce the same result
+
 ## Documentation
 
 Documentation is expected to move with the code.
@@ -354,19 +398,20 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the repo's documentation and PR expec
 
 Sprint 1 established the architecture, configuration, runtime ingestion, diagnostics, CI, and test foundation.
 
-The current code also includes the first Sprint 2 vertical slice:
+The current code now spans the planned work through Sprint 4:
 
 - deterministic feature extraction from `AudioChunk` to `FeatureFrame`
 - ONNX-backed feature extraction behind the same `FeatureExtractor` port
 - filesystem-backed loading of prepared reference profiles
+- offline reference profile builder CLI for Sprint 3
+- offline alignment tool with cosine distance, normalized Euclidean distance, baseline DTW, and subsequence DTW
 - nearest-neighbor matching from live feature frames to reference frames
 - simple stabilization to reduce backward jumps and unconfirmed large jumps
 - slide resolution from stable matches to `SlideCommand`
 - logging presentation gateway for local slide-trigger visibility
-- offline reference profile builder CLI for Sprint 3
 - runtime accounting for `feature_frames_processed`
 - invalid feature frame detection via `invalid_inference_outputs`
 - match accounting via `accepted_matches` and `low_confidence_matches`
 - slide trigger accounting via `slide_triggers_sent` and `osc_send_failures`
 
-Real OSC delivery and richer presentation integration are still follow-up work.
+Real OSC delivery and richer live tracking integration are still follow-up work.

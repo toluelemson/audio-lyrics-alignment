@@ -105,9 +105,10 @@
       working runtime path, not the full future product vision. The current
       codebase is an audio ingestion, diagnostics, and deterministic feature
       extraction pipeline with an ONNX-backed extractor path plus prepared
-      reference profile loading, an offline reference builder workflow,
-      baseline nearest-neighbor matching, a simple stabilization layer, and
-      slide resolution. It does not yet perform real OSC output.
+      reference profile loading, an offline reference builder workflow, an
+      offline alignment tool, baseline nearest-neighbor matching, a simple
+      stabilization layer, and slide resolution. It does not yet perform real
+      OSC output.
     </p>
 
     <div class="callout">
@@ -115,10 +116,11 @@
       audio, pushes chunks through a bounded queue, computes basic signal
       diagnostics, extracts feature frames through either a deterministic or
       ONNX-backed extractor, loads a prepared reference profile, can build one
-      offline from WAV plus slide JSON, runs a baseline nearest-neighbor match,
-      applies simple stabilization rules, resolves slide commands from
-      reference cues, and logs metrics. The more advanced “lyrics alignment”
-      parts are still planned, not runtime behavior yet.
+      offline from WAV plus slide JSON, can align a recorded WAV against that
+      profile offline with DTW-based methods, runs a baseline nearest-neighbor
+      match, applies simple stabilization rules, resolves slide commands from
+      reference cues, and logs metrics. More advanced live alignment is still
+      planned beyond this baseline.
     </div>
 
     <h2>1. Fast Summary</h2>
@@ -159,6 +161,9 @@
   separate offline reference builder for reproducible profiles
         |
         v
+  separate offline DTW alignment tool for recorded performances
+        |
+        v
   baseline nearest-neighbor match against reference frames
         |
         v
@@ -183,10 +188,12 @@
       <li><span class="file-ref">src/lyrics_aligner/adapters/features/simulated.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/features/onnx_runtime.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/reference_profiles/filesystem.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/application/offline_alignment.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/nearest_neighbor.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/stabilized.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/slides/timeline.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/presentation/logging_gateway.py</span></li>
+      <li><span class="file-ref">tools/offline_align.py</span></li>
     </ol>
 
     <h2>3. Package-Level Mental Model</h2>
@@ -218,7 +225,8 @@
           audio adapters plus deterministic and ONNX-backed feature extractor
           adapters, a filesystem-backed reference profile adapter, and a
           nearest-neighbor matcher adapter plus a stabilizing wrapper, a
-          timeline slide resolver, and a logging presentation gateway.
+          timeline slide resolver, a logging presentation gateway, and an
+          offline alignment workflow.
         </p>
       </div>
       <div class="card">
@@ -670,19 +678,22 @@ feature_frames_processed=...</pre>
 
     <h2>18. What the Code Does Not Yet Do</h2>
     <p>
-      The executable path now does basic matching and slide triggering, but it
-      still stops short of a full production presentation pipeline.
+      The codebase now includes offline alignment and a basic executable
+      matching path, but it still stops short of a full production
+      presentation pipeline.
     </p>
     <ul>
-      <li>matching is still a simple nearest-neighbor baseline</li>
-      <li>stabilization is still heuristic, not sequence-aware alignment</li>
+      <li>offline alignment is still a baseline DTW implementation</li>
+      <li>live tracking is still a simple nearest-neighbor plus heuristics path</li>
       <li>slide output currently goes to a logging gateway, not a real OSC transport</li>
     </ul>
     <p>
       So if you are trying to understand “where the intelligent lyrics
-      alignment happens,” the honest answer is: it is still early. The current
-      path proves the architecture can ingest audio, extract features, match
-      them to a reference, and turn stable matches into slide commands.
+      alignment happens,” the honest answer is: the first offline answer now
+      exists, and the live answer is still early. The current code proves the
+      architecture can build reference profiles, align recorded performances
+      offline, match live features to a reference, and turn stable matches
+      into slide commands.
     </p>
 
     <h2>19. End-to-End Example: Simulated Mode</h2>
@@ -803,6 +814,20 @@ git diff --exit-code -- docs/runtime-flow-walkthrough.pdf</pre>
       <li><code>invalid_inference_outputs</code> stays low for a healthy model</li>
     </ul>
 
+    <h3>Manual Offline Alignment Test</h3>
+    <pre>python tools/offline_align.py \
+  --live-audio amazing-grace-live.wav \
+  --reference-profile profiles/amazing-grace \
+  --method subsequence \
+  --metric cosine</pre>
+    <p>Expected results:</p>
+    <ul>
+      <li>the tool prints a live-to-reference timestamp estimate</li>
+      <li>it prints a confidence value</li>
+      <li>it prints a JSON summary with normalized path cost</li>
+      <li>repeated runs on the same inputs stay consistent</li>
+    </ul>
+
     <h3>What A Passing Sprint Looks Like</h3>
     <ul>
       <li>simulated mode runs without dropped chunks</li>
@@ -820,13 +845,14 @@ git diff --exit-code -- docs/runtime-flow-walkthrough.pdf</pre>
       <li>configuration comes in through config/env/CLI</li>
       <li>an adapter yields <code>AudioChunk</code> objects</li>
       <li>the runtime protects itself with a bounded queue</li>
-      <li>processing currently means diagnostics plus feature extraction, not alignment</li>
-      <li>metrics and logging show whether the ingestion path behaves correctly</li>
+      <li>offline tools now cover profile building and recorded-performance alignment</li>
+      <li>live runtime processing currently means diagnostics plus baseline matching</li>
+      <li>metrics and logging show whether the ingestion and matching path behaves correctly</li>
     </ul>
     <p>
       Once you understand that, the rest of the future system is easier to
-      imagine: alignment plus slide decisions will sit downstream of the same runtime
-      backbone.
+      imagine: stronger live alignment and real presentation output will sit
+      downstream of the same runtime backbone.
     </p>
   </body>
 </html>
