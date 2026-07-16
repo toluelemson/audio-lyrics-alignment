@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Audio Lyrics Aligner Runtime Flow Walkthrough</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --fg: #1f2937;
+        --muted: #4b5563;
+        --line: #d1d5db;
+        --bg: #ffffff;
+        --bg-soft: #f8fafc;
+        --accent: #0f766e;
+      }
+
+      body {
+        margin: 48px auto;
+        max-width: 920px;
+        padding: 0 28px 48px;
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        line-height: 1.55;
+        color: var(--fg);
+        background: var(--bg);
+      }
+
+      h1, h2, h3 {
+        line-height: 1.2;
+        margin-top: 1.8em;
+        margin-bottom: 0.45em;
+      }
+
+      h1 {
+        font-size: 30px;
+        border-bottom: 3px solid var(--accent);
+        padding-bottom: 12px;
+      }
+
+      h2 {
+        font-size: 22px;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 6px;
+      }
+
+      h3 {
+        font-size: 18px;
+      }
+
+      p, li {
+        font-size: 14px;
+      }
+
+      p.lead {
+        font-size: 16px;
+        color: var(--muted);
+      }
+
+      code, pre {
+        font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      }
+
+      pre {
+        background: var(--bg-soft);
+        border: 1px solid var(--line);
+        padding: 14px;
+        border-radius: 8px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+      }
+
+      .callout {
+        background: #ecfeff;
+        border-left: 5px solid var(--accent);
+        padding: 14px 16px;
+        margin: 18px 0;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px 16px;
+        background: var(--bg-soft);
+      }
+
+      .file-ref {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      ul, ol {
+        padding-left: 22px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Audio Lyrics Aligner: Detailed Runtime Flow Walkthrough</h1>
+    <p class="lead">
+      This document explains the code as it exists today. It focuses on the
+      working runtime path, not the full future product vision. The current
+      codebase is an audio ingestion and diagnostics pipeline. It does not yet
+      perform feature extraction, alignment, slide resolution, or OSC output.
+    </p>
+
+    <div class="callout">
+      <strong>Current truth:</strong> the code already captures or simulates
+      audio, pushes chunks through a bounded queue, computes basic signal
+      diagnostics, and logs metrics. The “lyrics alignment” parts are mostly
+      planned types and interfaces, not runtime behavior yet.
+    </div>
+
+    <h2>1. Fast Summary</h2>
+    <pre>CLI args + env vars
+        |
+        v
+     AppConfig
+        |
+        v
+     main.py chooses AudioSource
+        |
+        +--> SimulatedAudioSource
+        |         or
+        +--> MicrophoneAudioSource
+        |
+        v
+  source.chunks() yields AudioChunk
+        |
+        v
+  AudioIngestionRuntime producer thread
+        |
+        v
+  BoundedAudioQueue
+        |
+        v
+  AudioIngestionRuntime consumer loop
+        |
+        v
+  compute RMS / peak / silence / clipping
+        |
+        v
+  RuntimeMetrics + log output + RuntimeReport</pre>
+
+    <h2>2. Read Order</h2>
+    <ol>
+      <li><span class="file-ref">src/lyrics_aligner/main.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/config.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/ports/audio_source.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/domain/models.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/application/runtime.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/application/metrics.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/audio/simulated.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/audio/microphone.py</span></li>
+    </ol>
+
+    <h2>3. Package-Level Mental Model</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>domain</h3>
+        <p>
+          Pure data structures and future business concepts. Today the main
+          active domain type is <code>AudioChunk</code>.
+        </p>
+      </div>
+      <div class="card">
+        <h3>ports</h3>
+        <p>
+          Abstract contracts. The runtime depends on <code>AudioSource</code>,
+          not on a concrete adapter.
+        </p>
+      </div>
+      <div class="card">
+        <h3>adapters</h3>
+        <p>
+          Concrete implementations. Right now there are two audio adapters:
+          simulated and microphone.
+        </p>
+      </div>
+      <div class="card">
+        <h3>application</h3>
+        <p>
+          Orchestration and lifecycle. This is where threading, queueing,
+          metrics, and logging live.
+        </p>
+      </div>
+    </div>
+
+    <h2>4. Entry Point: What main.py Actually Does</h2>
+    <p>
+      <span class="file-ref">main.py</span> is intentionally thin. It does not
+      contain signal-processing logic. It acts as a bootstrapping layer.
+    </p>
+    <p>Main responsibilities:</p>
+    <ul>
+      <li>parse CLI arguments</li>
+      <li>load environment-driven configuration</li>
+      <li>construct the selected audio source</li>
+      <li>construct the runtime</li>
+      <li>run the runtime and log the final summary</li>
+    </ul>
+    <p>
+      The most important helper in the file is
+      <code>_build_audio_source(config)</code>. That function decides whether
+      the program runs in simulated mode or microphone mode.
+    </p>
+
+    <h3>Startup Sequence</h3>
+    <ol>
+      <li><code>_parse_args()</code> reads CLI flags.</li>
+      <li><code>_config_from_args()</code> merges CLI args with env-based defaults.</li>
+      <li><code>_build_audio_source()</code> returns an <code>AudioSource</code>.</li>
+      <li><code>AudioIngestionRuntime(...)</code> is created.</li>
+      <li><code>runtime.run()</code> starts producer/consumer processing.</li>
+      <li>A final summary log line is emitted from the returned report.</li>
+    </ol>
+
+    <h2>5. Configuration Flow</h2>
+    <p>
+      Configuration is centralized in
+      <span class="file-ref">src/lyrics_aligner/config.py</span>.
+    </p>
+
+    <h3>Why AppConfig Exists</h3>
+    <p>
+      The code does not scatter constants everywhere. Instead, it keeps runtime
+      choices in one dataclass. That makes the boot path deterministic and
+      easy to extend later.
+    </p>
+
+    <h3>Important Fields</h3>
+    <ul>
+      <li><code>audio_source</code>: selects <code>simulated</code> or <code>microphone</code></li>
+      <li><code>sample_rate</code>: audio sampling frequency</li>
+      <li><code>channels</code>: currently expected to be mono for the main path</li>
+      <li><code>block_size</code>: samples per chunk</li>
+      <li><code>audio_queue_capacity</code>: bounded queue size in the runtime</li>
+      <li><code>input_device</code>: microphone device name or index</li>
+      <li><code>simulation_duration_seconds</code>: simulated stream length</li>
+      <li><code>diagnostics_interval_seconds</code>: log cadence</li>
+      <li><code>silence_threshold_rms</code>: threshold for silent chunk counting</li>
+      <li><code>clipping_threshold_peak</code>: threshold for clipped chunk counting</li>
+    </ul>
+
+    <h3>Env Var Precedence</h3>
+    <p>
+      <code>AppConfig.from_env()</code> reads
+      <code>LYRICS_ALIGNER_*</code> variables. Then
+      <code>_config_from_args()</code> lets CLI flags override some of those
+      values. That means the effective precedence is:
+    </p>
+    <pre>hardcoded defaults
+    -> environment variables
+    -> CLI arguments</pre>
+
+    <h2>6. The Port Abstraction</h2>
+    <p>
+      The key interface is
+      <span class="file-ref">src/lyrics_aligner/ports/audio_source.py</span>.
+    </p>
+    <pre>class AudioSource(Protocol):
+    def chunks(self) -> Iterator[AudioChunk]: ...</pre>
+    <p>
+      That single interface is what keeps the runtime generic. The application
+      layer only knows “I can iterate audio chunks.” It does not know whether
+      those chunks came from NumPy synthesis, a microphone callback, a WAV file,
+      or some future network source.
+    </p>
+
+    <h2>7. Core Domain Model: AudioChunk</h2>
+    <p>
+      The main active domain model is
+      <span class="file-ref">src/lyrics_aligner/domain/models.py</span>.
+    </p>
+    <pre>@dataclass(frozen=True, slots=True)
+class AudioChunk:
+    samples: FloatArray
+    captured_at: float
+    sequence_number: int</pre>
+    <p>Each field matters:</p>
+    <ul>
+      <li><code>samples</code>: the raw waveform for that time slice</li>
+      <li><code>captured_at</code>: when the chunk was considered captured</li>
+      <li><code>sequence_number</code>: monotonic chunk ordering</li>
+    </ul>
+    <p>
+      Most of the runtime is effectively “move <code>AudioChunk</code> safely
+      from source to processor.”
+    </p>
+
+    <h2>8. Simulated Audio Adapter</h2>
+    <p>
+      <span class="file-ref">adapters/audio/simulated.py</span> is the easier
+      adapter to understand because it does not involve callback APIs.
+    </p>
+
+    <h3>What It Does</h3>
+    <ul>
+      <li>validates a sine-wave configuration</li>
+      <li>computes chunks of waveform samples</li>
+      <li>paces delivery in real time</li>
+      <li>yields <code>AudioChunk</code> objects</li>
+    </ul>
+
+    <h3>Why It Matters</h3>
+    <p>
+      It lets the rest of the pipeline be tested without touching real audio
+      hardware. This is important because queue behavior, shutdown behavior, and
+      metrics logic can all be built before device integration is stable.
+    </p>
+
+    <h3>Key Details</h3>
+    <ul>
+      <li><code>duration * sample_rate</code> determines total samples</li>
+      <li>the loop walks those samples in <code>block_size</code> increments</li>
+      <li>each block computes a deterministic sine wave</li>
+      <li>the adapter waits until the scheduled capture time before yielding</li>
+      <li><code>stop()</code> interrupts the wait via a threading event</li>
+    </ul>
+
+    <h2>9. Microphone Audio Adapter</h2>
+    <p>
+      <span class="file-ref">adapters/audio/microphone.py</span> is more subtle
+      because real audio APIs are callback-driven.
+    </p>
+
+    <h3>What It Does</h3>
+    <ul>
+      <li>opens a <code>sounddevice.InputStream</code></li>
+      <li>receives audio frames inside a callback</li>
+      <li>converts those frames to mono <code>float32</code></li>
+      <li>packages them into <code>AudioChunk</code></li>
+      <li>pushes them into an internal queue</li>
+      <li>yields them to the runtime from <code>chunks()</code></li>
+    </ul>
+
+    <h3>Why There Is an Internal Queue</h3>
+    <p>
+      The audio callback should stay fast. Doing heavier work inside that
+      callback is risky because callback stalls can cause audio dropouts or
+      timing issues. So the callback only does the minimum:
+    </p>
+    <ol>
+      <li>receive input samples</li>
+      <li>convert shape and dtype</li>
+      <li>wrap them in <code>AudioChunk</code></li>
+      <li>put them into a queue</li>
+    </ol>
+    <p>
+      Then the outer iterator yields from that queue at normal Python speed.
+    </p>
+
+    <h3>Important Distinction</h3>
+    <p>
+      The microphone adapter has its own small internal queue, but the main
+      backpressure policy for the application still lives in the runtime’s
+      bounded queue. So there are two queue layers with different purposes:
+    </p>
+    <ul>
+      <li>adapter queue: callback-safe handoff</li>
+      <li>runtime queue: application-level backpressure and drop policy</li>
+    </ul>
+
+    <h2>10. Runtime: The Actual Working Pipeline</h2>
+    <p>
+      <span class="file-ref">application/runtime.py</span> is the operational
+      center of the codebase.
+    </p>
+
+    <h3>Two Logical Sides</h3>
+    <div class="grid">
+      <div class="card">
+        <h3>Producer Side</h3>
+        <p>
+          Reads chunks from the source and inserts them into the bounded queue.
+        </p>
+      </div>
+      <div class="card">
+        <h3>Consumer Side</h3>
+        <p>
+          Pulls chunks from the bounded queue, processes them, and logs metrics.
+        </p>
+      </div>
+    </div>
+
+    <h3>run()</h3>
+    <p>
+      <code>run()</code> creates a producer thread and then immediately starts
+      the consumer loop on the main thread. This means the runtime is already a
+      concurrent system even though the processing stage is still simple.
+    </p>
+
+    <h3>Producer Thread</h3>
+    <p>
+      <code>_produce()</code> iterates over <code>self._source.chunks()</code>.
+      For every chunk:
+    </p>
+    <ol>
+      <li>check whether stop was requested</li>
+      <li>push into the bounded queue</li>
+      <li>increment <code>chunks_received</code></li>
+      <li>increment <code>chunks_dropped</code> if the queue dropped one</li>
+      <li>update <code>queue_high_water_mark</code></li>
+    </ol>
+
+    <h3>Consumer Loop</h3>
+    <p>The main loop in <code>run()</code> does this repeatedly:</p>
+    <ol>
+      <li>try to get a chunk from the bounded queue</li>
+      <li>if a chunk exists, process it</li>
+      <li>if the diagnostics interval has elapsed, log a snapshot</li>
+      <li>keep going until the producer is dead and the queue is empty</li>
+    </ol>
+
+    <h2>11. Bounded Queue and Backpressure</h2>
+    <p>
+      <code>BoundedAudioQueue</code> implements a deliberate real-time policy:
+      when the queue is full, drop the oldest chunk instead of blocking the
+      producer.
+    </p>
+    <pre>if len(self._items) == self._capacity:
+    self._items.popleft()
+    dropped = True
+self._items.append(item)</pre>
+    <p>
+      That decision reflects the architecture document: stale live audio is
+      usually less valuable than current live audio. This is why the queue is
+      bounded at all. If it were unbounded, latency could grow silently.
+    </p>
+
+    <h3>Why Oldest Is Dropped</h3>
+    <ul>
+      <li>the system stays near real time</li>
+      <li>memory usage stays bounded</li>
+      <li>capture is not blocked by downstream slowness</li>
+      <li>metrics still reveal the overload via <code>chunks_dropped</code></li>
+    </ul>
+
+    <h2>12. Processing Step Today</h2>
+    <p>
+      The current processing logic is intentionally small. It is not yet feature
+      extraction or alignment.
+    </p>
+    <p>In <code>_process(chunk)</code> the runtime computes:</p>
+    <ul>
+      <li>RMS energy from the waveform</li>
+      <li>peak absolute value from the waveform</li>
+    </ul>
+    <p>Then it classifies the chunk:</p>
+    <ul>
+      <li>silent if <code>rms &lt;= silence_threshold_rms</code></li>
+      <li>clipped if <code>peak &gt;= clipping_threshold_peak</code></li>
+    </ul>
+    <p>
+      That is the entire signal-analysis stage at the moment. It exists to
+      validate the runtime path before more complex feature extraction is added.
+    </p>
+
+    <h2>13. Metrics</h2>
+    <p>
+      <span class="file-ref">application/metrics.py</span> stores counters in a
+      mutable dataclass.
+    </p>
+    <p>Currently relevant counters:</p>
+    <ul>
+      <li><code>chunks_received</code></li>
+      <li><code>chunks_dropped</code></li>
+      <li><code>silent_chunks</code></li>
+      <li><code>clipped_chunks</code></li>
+      <li><code>queue_high_water_mark</code></li>
+    </ul>
+    <p>
+      Other counters are placeholders for future stages such as feature
+      extraction, matching, and presentation output.
+    </p>
+
+    <h2>14. Logging and RuntimeReport</h2>
+    <p>
+      The runtime periodically emits a log line with the latest values. At the
+      end, it returns a <code>RuntimeReport</code>.
+    </p>
+    <pre>device=...
+rms=...
+peak=...
+queue=current/capacity
+chunks_received=...
+chunks_dropped=...
+silent_chunks=...
+clipped_chunks=...</pre>
+    <p>
+      <code>RuntimeReport</code> is effectively the final snapshot returned to
+      <code>main()</code>. It contains:
+    </p>
+    <ul>
+      <li>device name</li>
+      <li>metrics snapshot</li>
+      <li>last observed RMS</li>
+      <li>last observed peak</li>
+      <li>final queue size and capacity</li>
+    </ul>
+
+    <h2>15. Threading Model</h2>
+    <p>The current runtime has a simple but important threading model:</p>
+    <ul>
+      <li>main thread: consumer loop + periodic logging</li>
+      <li>producer thread: iterates source chunks and fills bounded queue</li>
+      <li>optional source callback thread: inside sounddevice when microphone mode is active</li>
+    </ul>
+    <p>
+      In microphone mode this means there can effectively be three layers of
+      execution:
+    </p>
+    <ol>
+      <li>sounddevice callback receives frames</li>
+      <li>microphone adapter iterator yields chunks</li>
+      <li>runtime producer thread forwards them into the bounded queue</li>
+      <li>main-thread consumer processes them</li>
+    </ol>
+
+    <h2>16. Shutdown Behavior</h2>
+    <p>
+      Shutdown is coordinated through events and queue closing.
+    </p>
+    <ul>
+      <li><code>AudioIngestionRuntime.stop()</code> sets a stop event</li>
+      <li>the runtime queue is closed</li>
+      <li>if the source has a <code>stop()</code> method, it is called</li>
+      <li>the producer thread is joined before the final report returns</li>
+    </ul>
+    <p>
+      This is why both adapters implement their own way of interrupting waits:
+      the simulated source wakes its event-based delay and the microphone source
+      pushes a sentinel through its internal queue.
+    </p>
+
+    <h2>17. What the Code Does Not Yet Do</h2>
+    <p>These planned concepts exist in shape but not in runtime behavior:</p>
+    <ul>
+      <li><code>FeatureFrame</code>: no feature extractor uses it yet</li>
+      <li><code>MatchResult</code>: no alignment engine produces it yet</li>
+      <li><code>SlideCommand</code>: no presentation adapter sends it yet</li>
+    </ul>
+    <p>
+      So if you are trying to understand “where the lyrics alignment happens,”
+      the honest answer is: it does not happen yet in the executable path.
+      What exists today is the ingestion foundation that alignment will later
+      plug into.
+    </p>
+
+    <h2>18. End-to-End Example: Simulated Mode</h2>
+    <pre>.venv/bin/python -m lyrics_aligner.main
+
+1. main parses args
+2. config resolves to audio_source=simulated
+3. SimulatedAudioSource is created
+4. runtime starts producer thread
+5. simulated source yields timed sine-wave chunks
+6. producer inserts them into BoundedAudioQueue
+7. consumer computes RMS/peak on each chunk
+8. periodic logs are emitted
+9. final RuntimeReport is returned and logged</pre>
+
+    <h2>19. End-to-End Example: Microphone Mode</h2>
+    <pre>.venv/bin/python -m lyrics_aligner.main --audio-source microphone --input-device "Built-in Microphone"
+
+1. main parses args
+2. config resolves to audio_source=microphone
+3. MicrophoneAudioSource is created
+4. runtime starts producer thread
+5. sounddevice callback receives live frames
+6. callback converts frames to AudioChunk and enqueues them internally
+7. microphone source iterator yields those chunks
+8. runtime producer inserts them into the bounded queue
+9. runtime consumer computes diagnostics and logs metrics</pre>
+
+    <h2>20. Best Way to Understand the Code in Practice</h2>
+    <ol>
+      <li>Run simulated mode first.</li>
+      <li>Read <span class="file-ref">main.py</span> top to bottom.</li>
+      <li>Read <span class="file-ref">runtime.py</span> next.</li>
+      <li>Then read <span class="file-ref">simulated.py</span>.</li>
+      <li>Only after that read <span class="file-ref">microphone.py</span>.</li>
+    </ol>
+    <p>
+      That order works because simulated mode is the simplest executable path.
+      If you start with the microphone adapter, you end up learning callback
+      plumbing before you understand the system around it.
+    </p>
+
+    <h2>21. Final Takeaway</h2>
+    <p>
+      The current code is a well-structured real-time ingestion skeleton:
+    </p>
+    <ul>
+      <li>configuration comes in through config/env/CLI</li>
+      <li>an adapter yields <code>AudioChunk</code> objects</li>
+      <li>the runtime protects itself with a bounded queue</li>
+      <li>processing currently means diagnostics, not alignment</li>
+      <li>metrics and logging show whether the ingestion path behaves correctly</li>
+    </ul>
+    <p>
+      Once you understand that, the rest of the future system is easier to
+      imagine: feature extraction will replace “compute RMS/peak only,” and
+      alignment plus slide decisions will sit downstream of the same runtime
+      backbone.
+    </p>
+  </body>
+</html>

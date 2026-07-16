@@ -18,3 +18,5 @@ jobs:
       - run: ruff check .
       - run: mypy src
       - run: pytest
+      - run: python3 scripts/generate_runtime_walkthrough_pdf.py
+      - run: git diff --exit-code -- docs/runtime-flow-walkthrough.pdf

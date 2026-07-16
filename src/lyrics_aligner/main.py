@@ -1,3 +1,4 @@
+import argparse
 import logging
 
 from lyrics_aligner.adapters.audio import (
@@ -32,12 +33,60 @@ def _build_audio_source(config: AppConfig) -> AudioSource:
     raise ValueError(f"Unsupported audio_source: {config.audio_source}")
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the audio-to-lyrics ingestion runtime.",
+    )
+    parser.add_argument(
+        "--audio-source",
+        choices=("simulated", "microphone"),
+        help="Choose the runtime audio input source.",
+    )
+    parser.add_argument(
+        "--input-device",
+        help="Audio input device name or numeric device index.",
+    )
+    parser.add_argument(
+        "--simulation-duration-seconds",
+        type=float,
+        help="Simulated audio duration when using the simulated source.",
+    )
+    return parser.parse_args()
+
+
+def _config_from_args(args: argparse.Namespace) -> AppConfig:
+    config = AppConfig.from_env()
+    input_device: str | int | None = config.input_device
+    if args.input_device is not None:
+        input_device = int(args.input_device) if args.input_device.isdigit() else args.input_device
+
+    return AppConfig(
+        audio_source=args.audio_source or config.audio_source,
+        sample_rate=config.sample_rate,
+        channels=config.channels,
+        block_size=config.block_size,
+        audio_queue_capacity=config.audio_queue_capacity,
+        input_device=input_device,
+        simulation_duration_seconds=(
+            args.simulation_duration_seconds
+            if args.simulation_duration_seconds is not None
+            else config.simulation_duration_seconds
+        ),
+        diagnostics_interval_seconds=config.diagnostics_interval_seconds,
+        silence_threshold_rms=config.silence_threshold_rms,
+        clipping_threshold_peak=config.clipping_threshold_peak,
+        osc_host=config.osc_host,
+        osc_port=config.osc_port,
+        osc_path=config.osc_path,
+    )
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    config = AppConfig()
+    config = _config_from_args(_parse_args())
     logger = logging.getLogger(__name__)
     source = _build_audio_source(config)
     runtime = AudioIngestionRuntime(
