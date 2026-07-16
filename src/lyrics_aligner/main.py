@@ -19,18 +19,22 @@ from lyrics_aligner.adapters.matching import (
     StabilizedFeatureMatcher,
     StabilizedFeatureMatcherConfig,
 )
+from lyrics_aligner.adapters.presentation import LoggingPresentationGateway
 from lyrics_aligner.adapters.reference_profiles import (
     FilesystemReferenceProfileRepository,
 )
+from lyrics_aligner.adapters.slides import TimelineSlideResolver
 from lyrics_aligner.application import AudioIngestionRuntime
 from lyrics_aligner.config import AppConfig
 from lyrics_aligner.domain.models import ReferenceProfile
 from lyrics_aligner.ports.audio_source import AudioSource
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 from lyrics_aligner.ports.feature_matcher import FeatureMatcher
+from lyrics_aligner.ports.presentation_gateway import PresentationGateway
 from lyrics_aligner.ports.reference_profile_repository import (
     ReferenceProfileRepository,
 )
+from lyrics_aligner.ports.slide_resolver import SlideResolver
 
 
 def _build_audio_source(config: AppConfig) -> AudioSource:
@@ -95,6 +99,21 @@ def _build_feature_matcher(
             confirmation_count=config.match_confirmation_count,
         ),
     )
+
+
+def _build_slide_resolver(profile: ReferenceProfile | None) -> SlideResolver | None:
+    if profile is None or not profile.slide_cues:
+        return None
+    return TimelineSlideResolver(profile)
+
+
+def _build_presentation_gateway(
+    logger: logging.Logger,
+    profile: ReferenceProfile | None,
+) -> PresentationGateway | None:
+    if profile is None or not profile.slide_cues:
+        return None
+    return LoggingPresentationGateway(logger)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -227,12 +246,16 @@ def main() -> None:
     source = _build_audio_source(config)
     feature_extractor = _build_feature_extractor(config)
     feature_matcher = _build_feature_matcher(config, profile)
+    slide_resolver = _build_slide_resolver(profile)
+    presentation_gateway = _build_presentation_gateway(logger, profile)
     runtime = AudioIngestionRuntime(
         source=source,
         queue_capacity=config.audio_queue_capacity,
         logger=logger,
         feature_extractor=feature_extractor,
         feature_matcher=feature_matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=presentation_gateway,
         diagnostics_interval_seconds=config.diagnostics_interval_seconds,
         device_name=getattr(source, "device_name", source.__class__.__name__),
         silence_threshold_rms=config.silence_threshold_rms,
@@ -244,7 +267,8 @@ def main() -> None:
         "Audio ingestion finished source=%s feature_extractor=%s sample_rate=%s block_size=%s "
         "chunks_received=%s chunks_dropped=%s silent_chunks=%s "
         "clipped_chunks=%s feature_frames_processed=%s accepted_matches=%s "
-        "low_confidence_matches=%s queue_high_water_mark=%s",
+        "low_confidence_matches=%s slide_triggers_sent=%s osc_send_failures=%s "
+        "queue_high_water_mark=%s",
         config.audio_source,
         config.feature_extractor,
         config.sample_rate,
@@ -256,6 +280,8 @@ def main() -> None:
         report.metrics.feature_frames_processed,
         report.metrics.accepted_matches,
         report.metrics.low_confidence_matches,
+        report.metrics.slide_triggers_sent,
+        report.metrics.osc_send_failures,
         report.metrics.queue_high_water_mark,
     )
 

@@ -11,9 +11,16 @@ from lyrics_aligner.adapters.matching import (
     StabilizedFeatureMatcherConfig,
 )
 from lyrics_aligner.application.runtime import AudioIngestionRuntime, BoundedAudioQueue
-from lyrics_aligner.domain.models import FeatureFrame, MatchResult, ReferenceProfile
+from lyrics_aligner.domain.models import (
+    FeatureFrame,
+    MatchResult,
+    ReferenceProfile,
+    SlideCommand,
+)
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 from lyrics_aligner.ports.feature_matcher import FeatureMatcher
+from lyrics_aligner.ports.presentation_gateway import PresentationGateway
+from lyrics_aligner.ports.slide_resolver import SlideResolver
 
 
 def test_bounded_audio_queue_drops_oldest_when_full() -> None:
@@ -307,3 +314,99 @@ def test_runtime_uses_stabilizer_to_filter_large_forward_jump() -> None:
     assert report.last_match is not None
     assert report.last_match.reference_frame == 4
     assert report.last_match.valid is True
+
+
+class SingleCommandSlideResolver:
+    def __init__(self) -> None:
+        self._emitted = False
+
+    def resolve(self, match: MatchResult) -> SlideCommand | None:
+        if self._emitted or not match.valid:
+            return None
+        self._emitted = True
+        return SlideCommand(
+            slide_number=1,
+            section="Verse 1",
+            lyrics="Amazing grace",
+            reference_timestamp=match.reference_timestamp,
+            confidence=match.confidence,
+        )
+
+
+class RecordingPresentationGateway:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.commands: list[SlideCommand] = []
+
+    def send(self, command: SlideCommand) -> None:
+        if self.fail:
+            raise RuntimeError("boom")
+        self.commands.append(command)
+
+
+def test_runtime_sends_slide_command_when_resolver_returns_one() -> None:
+    extractor: FeatureExtractor = RepeatingFeatureExtractor()
+    matcher: FeatureMatcher = SequenceMatcher(
+        [MatchResult(1, 0.25, 0.1, 0.1, 0.95, True)]
+    )
+    slide_resolver: SlideResolver = SingleCommandSlideResolver()
+    gateway = RecordingPresentationGateway()
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.01,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-slide-send"),
+        feature_extractor=extractor,
+        feature_matcher=matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.slide_triggers_sent == 1
+    assert report.metrics.osc_send_failures == 0
+    assert report.last_slide_command is not None
+    assert report.last_slide_command.slide_number == 1
+    assert len(gateway.commands) == 1
+
+
+def test_runtime_counts_gateway_failures_for_slide_command() -> None:
+    extractor: FeatureExtractor = RepeatingFeatureExtractor()
+    matcher: FeatureMatcher = SequenceMatcher(
+        [MatchResult(1, 0.25, 0.1, 0.1, 0.95, True)]
+    )
+    slide_resolver: SlideResolver = SingleCommandSlideResolver()
+    gateway: PresentationGateway = RecordingPresentationGateway(fail=True)
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.01,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-slide-failure"),
+        feature_extractor=extractor,
+        feature_matcher=matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.slide_triggers_sent == 0
+    assert report.metrics.osc_send_failures == 1
+    assert report.last_slide_command is not None

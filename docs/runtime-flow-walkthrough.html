@@ -105,9 +105,9 @@
       working runtime path, not the full future product vision. The current
       codebase is an audio ingestion, diagnostics, and deterministic feature
       extraction pipeline with an ONNX-backed extractor path plus prepared
-      reference profile loading, baseline nearest-neighbor matching, and a
-      simple stabilization layer. It does not yet perform slide resolution or
-      OSC output.
+      reference profile loading, baseline nearest-neighbor matching, a
+      simple stabilization layer, and slide resolution. It does not yet
+      perform real OSC output.
     </p>
 
     <div class="callout">
@@ -116,8 +116,8 @@
       diagnostics, extracts feature frames through either a deterministic or
       ONNX-backed extractor, loads a prepared reference profile, runs a
       baseline nearest-neighbor match, applies simple stabilization rules,
-      and logs metrics. The more advanced “lyrics alignment” parts are still
-      planned, not runtime behavior yet.
+      resolves slide commands from reference cues, and logs metrics. The more
+      advanced “lyrics alignment” parts are still planned, not runtime behavior yet.
     </div>
 
     <h2>1. Fast Summary</h2>
@@ -161,6 +161,9 @@
   simple stabilization of backward and large forward jumps
         |
         v
+  timeline slide resolution + logging presentation gateway
+        |
+        v
   RuntimeMetrics + log output + RuntimeReport</pre>
 
     <h2>2. Read Order</h2>
@@ -178,6 +181,8 @@
       <li><span class="file-ref">src/lyrics_aligner/adapters/reference_profiles/filesystem.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/nearest_neighbor.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/stabilized.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/slides/timeline.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/presentation/logging_gateway.py</span></li>
     </ol>
 
     <h2>3. Package-Level Mental Model</h2>
@@ -188,7 +193,8 @@
           Pure data structures and future business concepts. Today the active
           domain types include <code>AudioChunk</code>,
           <code>FeatureFrame</code>, <code>ReferenceProfile</code>, and
-          <code>MatchResult</code>.
+          <code>MatchResult</code>, <code>SlideCue</code>, and
+          <code>SlideCommand</code>.
         </p>
       </div>
       <div class="card">
@@ -196,8 +202,9 @@
         <p>
           Abstract contracts. The runtime depends on ports like
           <code>AudioSource</code>, <code>FeatureExtractor</code>, and
-          <code>ReferenceProfileRepository</code>, and
-          <code>FeatureMatcher</code>, not on concrete adapters.
+          <code>ReferenceProfileRepository</code>, <code>FeatureMatcher</code>,
+          <code>SlideResolver</code>, and <code>PresentationGateway</code>,
+          not on concrete adapters.
         </p>
       </div>
       <div class="card">
@@ -206,7 +213,8 @@
           Concrete implementations. Right now there are simulated and microphone
           audio adapters plus deterministic and ONNX-backed feature extractor
           adapters, a filesystem-backed reference profile adapter, and a
-          nearest-neighbor matcher adapter plus a stabilizing wrapper.
+          nearest-neighbor matcher adapter plus a stabilizing wrapper, a
+          timeline slide resolver, and a logging presentation gateway.
         </p>
       </div>
       <div class="card">
@@ -231,6 +239,7 @@
       <li>construct the selected feature extractor</li>
       <li>optionally load the selected reference profile directory</li>
       <li>optionally construct the matcher and stabilizer for the loaded profile</li>
+      <li>optionally construct a slide resolver and presentation gateway</li>
       <li>construct the runtime</li>
       <li>run the runtime and log the final summary</li>
     </ul>
@@ -248,6 +257,7 @@
       <li><code>_build_audio_source()</code> returns an <code>AudioSource</code>.</li>
       <li><code>_build_feature_extractor()</code> returns a <code>FeatureExtractor</code>.</li>
       <li><code>_build_feature_matcher()</code> returns a baseline matcher wrapped in a simple stabilizer when a reference profile is present.</li>
+      <li><code>_build_slide_resolver()</code> returns a timeline resolver when the profile contains slide cues.</li>
       <li><code>AudioIngestionRuntime(...)</code> is created.</li>
       <li><code>runtime.run()</code> starts producer/consumer processing.</li>
       <li>A final summary log line is emitted from the returned report.</li>
@@ -640,16 +650,20 @@ feature_frames_processed=...</pre>
     </p>
 
     <h2>18. What the Code Does Not Yet Do</h2>
-    <p>These planned concepts exist in shape but not in runtime behavior:</p>
+    <p>
+      The executable path now does basic matching and slide triggering, but it
+      still stops short of a full production presentation pipeline.
+    </p>
     <ul>
-      <li><code>MatchResult</code>: no alignment engine produces it yet</li>
-      <li><code>SlideCommand</code>: no presentation adapter sends it yet</li>
+      <li>matching is still a simple nearest-neighbor baseline</li>
+      <li>stabilization is still heuristic, not sequence-aware alignment</li>
+      <li>slide output currently goes to a logging gateway, not a real OSC transport</li>
     </ul>
     <p>
-      So if you are trying to understand “where the lyrics alignment happens,”
-      the honest answer is: it does not happen yet in the executable path.
-      What exists today is the ingestion foundation that alignment will later
-      plug into.
+      So if you are trying to understand “where the intelligent lyrics
+      alignment happens,” the honest answer is: it is still early. The current
+      path proves the architecture can ingest audio, extract features, match
+      them to a reference, and turn stable matches into slide commands.
     </p>
 
     <h2>19. End-to-End Example: Simulated Mode</h2>

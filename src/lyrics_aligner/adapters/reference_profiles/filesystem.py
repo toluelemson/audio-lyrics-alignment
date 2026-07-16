@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from lyrics_aligner.domain.models import FeatureFrame, ReferenceProfile
+from lyrics_aligner.domain.models import FeatureFrame, ReferenceProfile, SlideCue
 
 
 class FilesystemReferenceProfileRepository:
@@ -55,7 +55,13 @@ class FilesystemReferenceProfileRepository:
             )
             for observed_at, row in zip(timestamp_values, features, strict=True)
         )
-        return ReferenceProfile(name=name.strip(), frames=frames, metadata=metadata)
+        slide_cues = self._read_slide_cues(profile_data.get("slides"))
+        return ReferenceProfile(
+            name=name.strip(),
+            frames=frames,
+            metadata=metadata,
+            slide_cues=slide_cues,
+        )
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, object]:
@@ -90,3 +96,40 @@ class FilesystemReferenceProfileRepository:
         if not np.isfinite(matrix).all():
             raise ValueError("reference_features.npy must contain only finite values")
         return matrix
+
+    @staticmethod
+    def _read_slide_cues(raw_cues: object) -> tuple[SlideCue, ...]:
+        if raw_cues is None:
+            return ()
+        if not isinstance(raw_cues, list):
+            raise ValueError("profile.json 'slides' must be a list when provided")
+
+        cues: list[SlideCue] = []
+        for entry in raw_cues:
+            if not isinstance(entry, dict):
+                raise ValueError("profile.json 'slides' entries must be objects")
+            slide_number = entry.get("slide_number")
+            section = entry.get("section")
+            lyrics = entry.get("lyrics")
+            reference_timestamp = entry.get("reference_timestamp")
+            if (
+                isinstance(slide_number, bool)
+                or not isinstance(slide_number, int)
+                or slide_number <= 0
+            ):
+                raise ValueError("slide_number must be a positive integer")
+            if not isinstance(section, str) or not section.strip():
+                raise ValueError("slide section must be a non-empty string")
+            if not isinstance(lyrics, str) or not lyrics.strip():
+                raise ValueError("slide lyrics must be a non-empty string")
+            if not isinstance(reference_timestamp, (int, float)) or reference_timestamp < 0:
+                raise ValueError("slide reference_timestamp must be a non-negative number")
+            cues.append(
+                SlideCue(
+                    slide_number=slide_number,
+                    section=section.strip(),
+                    lyrics=lyrics,
+                    reference_timestamp=float(reference_timestamp),
+                )
+            )
+        return tuple(sorted(cues, key=lambda cue: cue.reference_timestamp))

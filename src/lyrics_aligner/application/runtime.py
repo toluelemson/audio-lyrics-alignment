@@ -9,10 +9,12 @@ from time import monotonic
 import numpy as np
 
 from lyrics_aligner.application.metrics import RuntimeMetrics
-from lyrics_aligner.domain.models import AudioChunk, FeatureFrame, MatchResult
+from lyrics_aligner.domain.models import AudioChunk, FeatureFrame, MatchResult, SlideCommand
 from lyrics_aligner.ports.audio_source import AudioSource
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 from lyrics_aligner.ports.feature_matcher import FeatureMatcher
+from lyrics_aligner.ports.presentation_gateway import PresentationGateway
+from lyrics_aligner.ports.slide_resolver import SlideResolver
 
 
 class BoundedAudioQueue:
@@ -76,6 +78,7 @@ class RuntimeReport:
     queue_size: int
     queue_capacity: int
     last_match: MatchResult | None
+    last_slide_command: SlideCommand | None
 
 
 class AudioIngestionRuntime:
@@ -88,6 +91,8 @@ class AudioIngestionRuntime:
         logger: logging.Logger,
         feature_extractor: FeatureExtractor | None = None,
         feature_matcher: FeatureMatcher | None = None,
+        slide_resolver: SlideResolver | None = None,
+        presentation_gateway: PresentationGateway | None = None,
         diagnostics_interval_seconds: float = 0.5,
         device_name: str = "SimulatedAudioSource",
         silence_threshold_rms: float = 0.01,
@@ -98,6 +103,8 @@ class AudioIngestionRuntime:
         self._logger = logger
         self._feature_extractor = feature_extractor
         self._feature_matcher = feature_matcher
+        self._slide_resolver = slide_resolver
+        self._presentation_gateway = presentation_gateway
         self._diagnostics_interval_seconds = diagnostics_interval_seconds
         self._device_name = device_name
         self._silence_threshold_rms = silence_threshold_rms
@@ -108,6 +115,7 @@ class AudioIngestionRuntime:
         self._last_rms = 0.0
         self._last_peak = 0.0
         self._last_match: MatchResult | None = None
+        self._last_slide_command: SlideCommand | None = None
 
     def run(self) -> RuntimeReport:
         producer = Thread(target=self._produce, name="audio-producer", daemon=True)
@@ -136,6 +144,7 @@ class AudioIngestionRuntime:
             queue_size=self._queue.qsize(),
             queue_capacity=self._queue.capacity,
             last_match=self._last_match,
+            last_slide_command=self._last_slide_command,
         )
 
     def stop(self) -> None:
@@ -180,8 +189,9 @@ class AudioIngestionRuntime:
             "device=%s rms=%.2f peak=%.2f queue=%s/%s "
             "chunks_received=%s chunks_dropped=%s "
             "silent_chunks=%s clipped_chunks=%s feature_frames_processed=%s "
-            "accepted_matches=%s low_confidence_matches=%s "
-            "last_reference_timestamp=%s last_confidence=%.2f",
+            "accepted_matches=%s low_confidence_matches=%s slide_triggers_sent=%s "
+            "osc_send_failures=%s last_reference_timestamp=%s "
+            "last_slide_number=%s last_confidence=%.2f",
             self._device_name,
             self._last_rms,
             self._last_peak,
@@ -194,9 +204,16 @@ class AudioIngestionRuntime:
             metrics.feature_frames_processed,
             metrics.accepted_matches,
             metrics.low_confidence_matches,
+            metrics.slide_triggers_sent,
+            metrics.osc_send_failures,
             (
                 f"{self._last_match.reference_timestamp:.2f}"
                 if self._last_match is not None
+                else "none"
+            ),
+            (
+                self._last_slide_command.slide_number
+                if self._last_slide_command is not None
                 else "none"
             ),
             self._last_match.confidence if self._last_match is not None else 0.0,
@@ -225,6 +242,32 @@ class AudioIngestionRuntime:
                 self._metrics.accepted_matches += 1
             else:
                 self._metrics.low_confidence_matches += 1
+        if self._slide_resolver is not None:
+            command = self._slide_resolver.resolve(result)
+            if command is not None:
+                self._emit_slide_command(command)
+
+    def _emit_slide_command(self, command: SlideCommand) -> None:
+        self._last_slide_command = command
+        if self._presentation_gateway is None:
+            with self._metrics_lock:
+                self._metrics.slide_triggers_sent += 1
+            return
+
+        try:
+            self._presentation_gateway.send(command)
+        except Exception:
+            self._logger.exception(
+                "Failed to send slide command slide_number=%s section=%s",
+                command.slide_number,
+                command.section,
+            )
+            with self._metrics_lock:
+                self._metrics.osc_send_failures += 1
+            return
+
+        with self._metrics_lock:
+            self._metrics.slide_triggers_sent += 1
 
     def _snapshot_metrics(self) -> RuntimeMetrics:
         with self._metrics_lock:

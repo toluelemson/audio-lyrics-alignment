@@ -123,6 +123,7 @@ Prepared reference profile directory contents:
 - `profile.json`: profile name, frame duration, and optional timestamps
 - `reference_features.npy`: 2D NumPy array of reference feature vectors
 - `metadata.json`: optional extra labels for future matching and presentation steps
+- optional `slides` list inside `profile.json`: slide cues with `slide_number`, `section`, `lyrics`, and `reference_timestamp`
 
 ## Testing The Current Sprint
 
@@ -247,6 +248,49 @@ Expected stabilization behavior:
 - backward jumps are rejected
 - bigger forward jumps need repeated confirmation before acceptance
 
+Manual slide-trigger test:
+
+```bash
+mkdir -p /tmp/reference-profile
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+import numpy as np
+
+base = Path("/tmp/reference-profile")
+np.save(base / "reference_features.npy", np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32))
+(base / "profile.json").write_text(
+    json.dumps(
+        {
+            "name": "demo-song",
+            "frame_duration_seconds": 0.25,
+            "timestamps_seconds": [0.0, 0.25],
+            "slides": [
+                {
+                    "slide_number": 1,
+                    "section": "Verse 1",
+                    "lyrics": "Amazing grace",
+                    "reference_timestamp": 0.0,
+                }
+            ],
+        }
+    ),
+    encoding="utf-8",
+)
+PY
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor simulated \
+  --reference-profile-path /tmp/reference-profile \
+  --simulation-duration-seconds 1.0
+```
+
+Expected behavior:
+
+- logs include `Triggered slide`
+- diagnostics include `slide_triggers_sent`
+- final summary reports slide trigger counts
+
 ## Documentation
 
 Documentation is expected to move with the code.
@@ -273,8 +317,11 @@ The current code also includes the first Sprint 2 vertical slice:
 - filesystem-backed loading of prepared reference profiles
 - nearest-neighbor matching from live feature frames to reference frames
 - simple stabilization to reduce backward jumps and unconfirmed large jumps
+- slide resolution from stable matches to `SlideCommand`
+- logging presentation gateway for local slide-trigger visibility
 - runtime accounting for `feature_frames_processed`
 - invalid feature frame detection via `invalid_inference_outputs`
 - match accounting via `accepted_matches` and `low_confidence_matches`
+- slide trigger accounting via `slide_triggers_sent` and `osc_send_failures`
 
-Slide decisions, richer smoothing, and OSC triggering are still follow-up work.
+Real OSC delivery and richer presentation integration are still follow-up work.

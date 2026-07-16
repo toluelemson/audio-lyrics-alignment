@@ -41,6 +41,19 @@ def test_loads_reference_profile_from_directory(tmp_path: Path) -> None:
     profile_path = tmp_path / "profile"
     _write_profile_fixture(
         profile_path,
+        profile={
+            "name": "song-a",
+            "frame_duration_seconds": 0.25,
+            "timestamps_seconds": [0.0, 0.25],
+            "slides": [
+                {
+                    "slide_number": 1,
+                    "section": "Verse 1",
+                    "lyrics": "Amazing grace",
+                    "reference_timestamp": 0.0,
+                }
+            ],
+        },
         metadata={"song": "Example Song", "section": "Verse 1"},
     )
 
@@ -52,6 +65,9 @@ def test_loads_reference_profile_from_directory(tmp_path: Path) -> None:
     assert profile.frames[0].observed_at == pytest.approx(0.0)
     assert profile.frames[1].frame_duration_seconds == pytest.approx(0.25)
     assert profile.metadata == {"song": "Example Song", "section": "Verse 1"}
+    assert len(profile.slide_cues) == 1
+    assert profile.slide_cues[0].slide_number == 1
+    assert profile.slide_cues[0].section == "Verse 1"
 
 
 def test_load_raises_when_required_file_is_missing(tmp_path: Path) -> None:
@@ -95,4 +111,22 @@ def test_load_raises_when_timestamp_count_does_not_match_features(tmp_path: Path
     repository = FilesystemReferenceProfileRepository()
 
     with pytest.raises(ValueError, match="matching the feature row count"):
+        repository.load(str(profile_path))
+
+
+def test_load_raises_when_slide_definition_is_invalid(tmp_path: Path) -> None:
+    profile_path = tmp_path / "profile"
+    _write_profile_fixture(
+        profile_path,
+        profile={
+            "name": "song-a",
+            "frame_duration_seconds": 0.25,
+            "timestamps_seconds": [0.0, 0.25],
+            "slides": [{"slide_number": 0, "section": "", "lyrics": "", "reference_timestamp": -1}],
+        },
+    )
+
+    repository = FilesystemReferenceProfileRepository()
+
+    with pytest.raises(ValueError, match="slide_number|section|lyrics|reference_timestamp"):
         repository.load(str(profile_path))

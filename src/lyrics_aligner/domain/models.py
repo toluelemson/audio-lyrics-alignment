@@ -25,6 +25,7 @@ class ReferenceProfile:
     name: str
     frames: tuple[FeatureFrame, ...]
     metadata: dict[str, str]
+    slide_cues: tuple["SlideCue", ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,3 +45,11 @@ class SlideCommand:
     lyrics: str
     reference_timestamp: float
     confidence: float
+
+
+@dataclass(frozen=True, slots=True)
+class SlideCue:
+    slide_number: int
+    section: str
+    lyrics: str
+    reference_timestamp: float
