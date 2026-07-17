@@ -16,14 +16,17 @@ from lyrics_aligner.adapters.features import (
 from lyrics_aligner.adapters.matching import (
     NearestNeighborFeatureMatcher,
     NearestNeighborFeatureMatcherConfig,
-    StabilizedFeatureMatcher,
-    StabilizedFeatureMatcherConfig,
+    TrackingFeatureMatcher,
+    TrackingFeatureMatcherConfig,
 )
 from lyrics_aligner.adapters.presentation import LoggingPresentationGateway
 from lyrics_aligner.adapters.reference_profiles import (
     FilesystemReferenceProfileRepository,
 )
-from lyrics_aligner.adapters.slides import TimelineSlideResolver
+from lyrics_aligner.adapters.slides import (
+    TimelineSlideResolver,
+    TimelineSlideResolverConfig,
+)
 from lyrics_aligner.application import AudioIngestionRuntime
 from lyrics_aligner.config import AppConfig
 from lyrics_aligner.domain.models import ReferenceProfile
@@ -91,20 +94,34 @@ def _build_feature_matcher(
             confidence_threshold=config.match_confidence_threshold,
         ),
     )
-    return StabilizedFeatureMatcher(
+    return TrackingFeatureMatcher(
         matcher,
-        StabilizedFeatureMatcherConfig(
+        TrackingFeatureMatcherConfig(
+            search_min_consecutive_matches=config.match_confirmation_count,
+            recovery_min_consecutive_matches=config.match_confirmation_count,
+            tracking_confidence_threshold=config.match_confidence_threshold,
+            recovery_confidence_threshold=config.tracking_recovery_confidence_threshold,
             max_forward_jump_frames=config.match_max_forward_jump_frames,
-            large_jump_threshold_frames=config.match_large_jump_threshold_frames,
-            confirmation_count=config.match_confirmation_count,
+            max_backward_recovery_frames=config.match_large_jump_threshold_frames,
+            lost_match_patience=config.tracking_lost_match_patience,
         ),
     )
 
 
-def _build_slide_resolver(profile: ReferenceProfile | None) -> SlideResolver | None:
+def _build_slide_resolver(
+    config: AppConfig,
+    profile: ReferenceProfile | None,
+) -> SlideResolver | None:
     if profile is None or not profile.slide_cues:
         return None
-    return TimelineSlideResolver(profile)
+    return TimelineSlideResolver(
+        profile,
+        TimelineSlideResolverConfig(
+            lookahead_seconds=config.slide_lookahead_seconds,
+            cooldown_seconds=config.slide_trigger_cooldown_seconds,
+            consecutive_match_count=config.slide_consecutive_match_count,
+        ),
+    )
 
 
 def _build_presentation_gateway(
@@ -167,6 +184,31 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         help="Number of repeated large-jump matches required before acceptance.",
     )
+    parser.add_argument(
+        "--tracking-recovery-confidence-threshold",
+        type=float,
+        help="Confidence threshold used while recovering from an uncertain position.",
+    )
+    parser.add_argument(
+        "--tracking-lost-match-patience",
+        type=int,
+        help="Number of bad frames tolerated before falling back to searching mode.",
+    )
+    parser.add_argument(
+        "--slide-lookahead-seconds",
+        type=float,
+        help="Allow slide cues to trigger slightly before the exact cue timestamp.",
+    )
+    parser.add_argument(
+        "--slide-trigger-cooldown-seconds",
+        type=float,
+        help="Minimum reference-time gap between emitted slide commands.",
+    )
+    parser.add_argument(
+        "--slide-consecutive-match-count",
+        type=int,
+        help="Number of stable cue-reaching matches required before emitting a slide.",
+    )
     return parser.parse_args()
 
 
@@ -197,6 +239,31 @@ def _config_from_args(args: argparse.Namespace) -> AppConfig:
         if args.match_confirmation_count is not None
         else config.match_confirmation_count
     )
+    tracking_recovery_confidence_threshold = (
+        args.tracking_recovery_confidence_threshold
+        if args.tracking_recovery_confidence_threshold is not None
+        else config.tracking_recovery_confidence_threshold
+    )
+    tracking_lost_match_patience = (
+        args.tracking_lost_match_patience
+        if args.tracking_lost_match_patience is not None
+        else config.tracking_lost_match_patience
+    )
+    slide_lookahead_seconds = (
+        args.slide_lookahead_seconds
+        if args.slide_lookahead_seconds is not None
+        else config.slide_lookahead_seconds
+    )
+    slide_trigger_cooldown_seconds = (
+        args.slide_trigger_cooldown_seconds
+        if args.slide_trigger_cooldown_seconds is not None
+        else config.slide_trigger_cooldown_seconds
+    )
+    slide_consecutive_match_count = (
+        args.slide_consecutive_match_count
+        if args.slide_consecutive_match_count is not None
+        else config.slide_consecutive_match_count
+    )
 
     return AppConfig(
         audio_source=args.audio_source or config.audio_source,
@@ -206,6 +273,11 @@ def _config_from_args(args: argparse.Namespace) -> AppConfig:
         match_max_forward_jump_frames=match_max_forward_jump_frames,
         match_large_jump_threshold_frames=match_large_jump_threshold_frames,
         match_confirmation_count=match_confirmation_count,
+        tracking_recovery_confidence_threshold=tracking_recovery_confidence_threshold,
+        tracking_lost_match_patience=tracking_lost_match_patience,
+        slide_lookahead_seconds=slide_lookahead_seconds,
+        slide_trigger_cooldown_seconds=slide_trigger_cooldown_seconds,
+        slide_consecutive_match_count=slide_consecutive_match_count,
         sample_rate=config.sample_rate,
         channels=config.channels,
         block_size=config.block_size,
@@ -246,7 +318,7 @@ def main() -> None:
     source = _build_audio_source(config)
     feature_extractor = _build_feature_extractor(config)
     feature_matcher = _build_feature_matcher(config, profile)
-    slide_resolver = _build_slide_resolver(profile)
+    slide_resolver = _build_slide_resolver(config, profile)
     presentation_gateway = _build_presentation_gateway(logger, profile)
     runtime = AudioIngestionRuntime(
         source=source,

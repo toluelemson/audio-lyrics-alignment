@@ -77,6 +77,7 @@ class RuntimeReport:
     peak: float
     queue_size: int
     queue_capacity: int
+    tracking_state: str | None
     last_match: MatchResult | None
     last_slide_command: SlideCommand | None
 
@@ -143,6 +144,7 @@ class AudioIngestionRuntime:
             peak=self._last_peak,
             queue_size=self._queue.qsize(),
             queue_capacity=self._queue.capacity,
+            tracking_state=self._tracking_state(),
             last_match=self._last_match,
             last_slide_command=self._last_slide_command,
         )
@@ -190,7 +192,7 @@ class AudioIngestionRuntime:
             "chunks_received=%s chunks_dropped=%s "
             "silent_chunks=%s clipped_chunks=%s feature_frames_processed=%s "
             "accepted_matches=%s low_confidence_matches=%s slide_triggers_sent=%s "
-            "osc_send_failures=%s last_reference_timestamp=%s "
+            "osc_send_failures=%s tracking_state=%s last_reference_timestamp=%s "
             "last_slide_number=%s last_confidence=%.2f",
             self._device_name,
             self._last_rms,
@@ -206,6 +208,7 @@ class AudioIngestionRuntime:
             metrics.low_confidence_matches,
             metrics.slide_triggers_sent,
             metrics.osc_send_failures,
+            self._tracking_state() or "none",
             (
                 f"{self._last_match.reference_timestamp:.2f}"
                 if self._last_match is not None
@@ -268,6 +271,12 @@ class AudioIngestionRuntime:
 
         with self._metrics_lock:
             self._metrics.slide_triggers_sent += 1
+
+    def _tracking_state(self) -> str | None:
+        if self._feature_matcher is None:
+            return None
+        state_name = getattr(self._feature_matcher, "state_name", None)
+        return state_name if isinstance(state_name, str) else None
 
     def _snapshot_metrics(self) -> RuntimeMetrics:
         with self._metrics_lock:

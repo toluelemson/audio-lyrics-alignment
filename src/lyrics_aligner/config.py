@@ -38,6 +38,11 @@ class AppConfig:
     match_max_forward_jump_frames: int = 4
     match_large_jump_threshold_frames: int = 2
     match_confirmation_count: int = 2
+    tracking_recovery_confidence_threshold: float = 0.6
+    tracking_lost_match_patience: int = 3
+    slide_lookahead_seconds: float = 0.2
+    slide_trigger_cooldown_seconds: float = 0.5
+    slide_consecutive_match_count: int = 2
     sample_rate: int = 16_000
     channels: int = 1
     block_size: int = 4_096
@@ -72,6 +77,26 @@ class AppConfig:
             ),
             match_confirmation_count=_read_int(
                 "LYRICS_ALIGNER_MATCH_CONFIRMATION_COUNT",
+                2,
+            ),
+            tracking_recovery_confidence_threshold=_read_float(
+                "LYRICS_ALIGNER_TRACKING_RECOVERY_CONFIDENCE_THRESHOLD",
+                0.6,
+            ),
+            tracking_lost_match_patience=_read_int(
+                "LYRICS_ALIGNER_TRACKING_LOST_MATCH_PATIENCE",
+                3,
+            ),
+            slide_lookahead_seconds=_read_float(
+                "LYRICS_ALIGNER_SLIDE_LOOKAHEAD_SECONDS",
+                0.2,
+            ),
+            slide_trigger_cooldown_seconds=_read_float(
+                "LYRICS_ALIGNER_SLIDE_TRIGGER_COOLDOWN_SECONDS",
+                0.5,
+            ),
+            slide_consecutive_match_count=_read_int(
+                "LYRICS_ALIGNER_SLIDE_CONSECUTIVE_MATCH_COUNT",
                 2,
             ),
             sample_rate=_read_int("LYRICS_ALIGNER_SAMPLE_RATE", 16_000),

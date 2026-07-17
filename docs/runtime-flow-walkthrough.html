@@ -106,9 +106,9 @@
       codebase is an audio ingestion, diagnostics, and deterministic feature
       extraction pipeline with an ONNX-backed extractor path plus prepared
       reference profile loading, an offline reference builder workflow, an
-      offline alignment tool, baseline nearest-neighbor matching, a simple
-      stabilization layer, and slide resolution. It does not yet perform real
-      OSC output.
+      offline alignment tool, baseline nearest-neighbor matching, an online
+      tracking state machine, and slide resolution. It does not yet perform
+      real OSC output.
     </p>
 
     <div class="callout">
@@ -118,9 +118,9 @@
       ONNX-backed extractor, loads a prepared reference profile, can build one
       offline from WAV plus slide JSON, can align a recorded WAV against that
       profile offline with DTW-based methods, runs a baseline nearest-neighbor
-      match, applies simple stabilization rules, resolves slide commands from
-      reference cues, and logs metrics. More advanced live alignment is still
-      planned beyond this baseline.
+      match, pushes those candidates through SEARCHING/TRACKING/UNCERTAIN
+      states, resolves slide commands from reference cues with look-ahead and
+      cooldown rules, and logs metrics. Real OSC delivery is still planned.
     </div>
 
     <h2>1. Fast Summary</h2>
@@ -167,10 +167,10 @@
   baseline nearest-neighbor match against reference frames
         |
         v
-  simple stabilization of backward and large forward jumps
+  online tracking state machine + confidence hysteresis
         |
         v
-  timeline slide resolution + logging presentation gateway
+  timeline slide resolution + duplicate suppression + logging gateway
         |
         v
   RuntimeMetrics + log output + RuntimeReport</pre>
@@ -191,6 +191,7 @@
       <li><span class="file-ref">src/lyrics_aligner/application/offline_alignment.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/nearest_neighbor.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/stabilized.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/matching/tracking.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/slides/timeline.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/presentation/logging_gateway.py</span></li>
       <li><span class="file-ref">tools/offline_align.py</span></li>
@@ -223,10 +224,10 @@
         <p>
           Concrete implementations. Right now there are simulated and microphone
           audio adapters plus deterministic and ONNX-backed feature extractor
-          adapters, a filesystem-backed reference profile adapter, and a
-          nearest-neighbor matcher adapter plus a stabilizing wrapper, a
-          timeline slide resolver, a logging presentation gateway, and an
-          offline alignment workflow.
+          adapters, a filesystem-backed reference profile adapter, a
+          nearest-neighbor matcher adapter, a tracking wrapper, a timeline
+          slide resolver, a logging presentation gateway, and an offline
+          alignment workflow.
         </p>
       </div>
       <div class="card">
@@ -250,7 +251,7 @@
       <li>construct the selected audio source</li>
       <li>construct the selected feature extractor</li>
       <li>optionally load the selected reference profile directory</li>
-      <li>optionally construct the matcher and stabilizer for the loaded profile</li>
+      <li>optionally construct the matcher and tracking wrapper for the loaded profile</li>
       <li>optionally construct a slide resolver and presentation gateway</li>
       <li>construct the runtime</li>
       <li>run the runtime and log the final summary</li>
@@ -268,7 +269,7 @@
       <li>If configured, the reference profile repository loads prepared profile artifacts from disk.</li>
       <li><code>_build_audio_source()</code> returns an <code>AudioSource</code>.</li>
       <li><code>_build_feature_extractor()</code> returns a <code>FeatureExtractor</code>.</li>
-      <li><code>_build_feature_matcher()</code> returns a baseline matcher wrapped in a simple stabilizer when a reference profile is present.</li>
+      <li><code>_build_feature_matcher()</code> returns a baseline matcher wrapped in the Sprint 5 tracking state machine when a reference profile is present.</li>
       <li><code>_build_slide_resolver()</code> returns a timeline resolver when the profile contains slide cues.</li>
       <li><code>AudioIngestionRuntime(...)</code> is created.</li>
       <li><code>runtime.run()</code> starts producer/consumer processing.</li>
@@ -294,7 +295,9 @@
       <li><code>feature_extractor</code>: selects <code>simulated</code> or <code>onnx</code></li>
       <li><code>reference_profile_path</code>: directory containing prepared reference features and metadata</li>
       <li><code>match_confidence_threshold</code>: minimum confidence required to accept a match</li>
-      <li><code>match_max_forward_jump_frames</code>: largest forward jump the stabilizer allows</li>
+      <li><code>match_max_forward_jump_frames</code>: largest forward jump the tracker accepts while staying locked</li>
+      <li><code>tracking_lost_match_patience</code>: how many bad frames are tolerated before dropping back to searching</li>
+      <li><code>slide_lookahead_seconds</code>: how early a cue may fire before its exact timestamp</li>
       <li><code>match_large_jump_threshold_frames</code>: jump size that starts requiring repeated confirmation</li>
       <li><code>match_confirmation_count</code>: repeated matches required before accepting a large jump</li>
       <li><code>sample_rate</code>: audio sampling frequency</li>

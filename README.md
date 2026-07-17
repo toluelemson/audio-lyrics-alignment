@@ -179,6 +179,23 @@ The offline alignment tool:
 - prints timestamp estimates
 - optionally reports alignment error against expected timestamp fixtures
 
+## Sprint 5 Online Tracking And Slide Stability
+
+The live runtime now adds a tracking state machine on top of frame-level
+matches:
+
+- `SEARCHING` waits for consecutive plausible matches before trusting position
+- `TRACKING` accepts stable forward progress and keeps reporting position
+- `UNCERTAIN` freezes slide output when confidence drops or jumps look wrong
+- recovery requires consecutive good matches before tracking resumes
+
+The slide resolver now adds:
+
+- `200 ms` cue look-ahead
+- consecutive-match validation at slide boundaries
+- duplicate suppression
+- trigger cooldown between slide commands
+
 ## Testing The Current Sprint
 
 Quality checks:
@@ -296,11 +313,14 @@ Expected behavior:
 - `last_reference_timestamp` changes from `none` once matching begins
 - the final summary includes match counts
 
-Expected stabilization behavior:
+Expected tracking behavior:
 
-- small forward moves are accepted immediately
-- backward jumps are rejected
-- bigger forward jumps need repeated confirmation before acceptance
+- diagnostics include `tracking_state`
+- startup begins in `SEARCHING`
+- after repeated good matches the runtime enters `TRACKING`
+- a weak or implausible match moves the runtime to `UNCERTAIN`
+- repeated recovery matches return the runtime to `TRACKING`
+- low confidence freezes slide output instead of advancing slides
 
 Manual slide-trigger test:
 
@@ -344,6 +364,9 @@ Expected behavior:
 - logs include `Triggered slide`
 - diagnostics include `slide_triggers_sent`
 - final summary reports slide trigger counts
+- slide output does not duplicate on one noisy frame
+- cue firing can happen slightly before the exact cue because of the `200 ms` look-ahead
+- rapid back-to-back cue emissions are limited by cooldown
 
 Manual Sprint 3 builder test:
 
@@ -398,7 +421,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the repo's documentation and PR expec
 
 Sprint 1 established the architecture, configuration, runtime ingestion, diagnostics, CI, and test foundation.
 
-The current code now spans the planned work through Sprint 4:
+The current code now spans the planned work through Sprint 5:
 
 - deterministic feature extraction from `AudioChunk` to `FeatureFrame`
 - ONNX-backed feature extraction behind the same `FeatureExtractor` port
@@ -406,12 +429,14 @@ The current code now spans the planned work through Sprint 4:
 - offline reference profile builder CLI for Sprint 3
 - offline alignment tool with cosine distance, normalized Euclidean distance, baseline DTW, and subsequence DTW
 - nearest-neighbor matching from live feature frames to reference frames
-- simple stabilization to reduce backward jumps and unconfirmed large jumps
+- online tracking state transitions across `SEARCHING`, `TRACKING`, and `UNCERTAIN`
+- recovery hysteresis after low-confidence or implausible jumps
 - slide resolution from stable matches to `SlideCommand`
+- slide-boundary confirmation, duplicate suppression, cue look-ahead, and cooldown
 - logging presentation gateway for local slide-trigger visibility
 - runtime accounting for `feature_frames_processed`
 - invalid feature frame detection via `invalid_inference_outputs`
 - match accounting via `accepted_matches` and `low_confidence_matches`
 - slide trigger accounting via `slide_triggers_sent` and `osc_send_failures`
 
-Real OSC delivery and richer live tracking integration are still follow-up work.
+Real OSC delivery remains Sprint 6 follow-up work.

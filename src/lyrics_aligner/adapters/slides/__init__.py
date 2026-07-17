@@ -1,5 +1,8 @@
 """Slide resolution adapters."""
 
-from lyrics_aligner.adapters.slides.timeline import TimelineSlideResolver
+from lyrics_aligner.adapters.slides.timeline import (
+    TimelineSlideResolver,
+    TimelineSlideResolverConfig,
+)
 
-__all__ = ["TimelineSlideResolver"]
+__all__ = ["TimelineSlideResolver", "TimelineSlideResolverConfig"]
