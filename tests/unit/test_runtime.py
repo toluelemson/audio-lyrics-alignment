@@ -68,6 +68,7 @@ def test_runtime_consumes_simulated_audio_and_returns_metrics(
     assert report.metrics.feature_frames_processed == 0
     assert report.metrics.queue_high_water_mark >= 1
     assert report.queue_size == 0
+    assert report.command_queue_size == 0
     assert report.last_match is None
     assert report.peak == pytest.approx(0.25, rel=0.05)
     assert report.rms > 0
@@ -374,6 +375,8 @@ def test_runtime_sends_slide_command_when_resolver_returns_one() -> None:
 
     assert report.metrics.slide_triggers_sent == 1
     assert report.metrics.osc_send_failures == 0
+    assert report.command_queue_capacity == 8
+    assert report.command_queue_size == 0
     assert report.last_slide_command is not None
     assert report.last_slide_command.slide_number == 1
     assert len(gateway.commands) == 1
@@ -409,4 +412,5 @@ def test_runtime_counts_gateway_failures_for_slide_command() -> None:
 
     assert report.metrics.slide_triggers_sent == 0
     assert report.metrics.osc_send_failures == 1
+    assert report.command_queue_size == 0
     assert report.last_slide_command is not None

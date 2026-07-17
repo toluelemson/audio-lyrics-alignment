@@ -107,8 +107,8 @@
       extraction pipeline with an ONNX-backed extractor path plus prepared
       reference profile loading, an offline reference builder workflow, an
       offline alignment tool, baseline nearest-neighbor matching, an online
-      tracking state machine, and slide resolution. It does not yet perform
-      real OSC output.
+      tracking state machine, slide resolution, and real OSC presentation
+      output.
     </p>
 
     <div class="callout">
@@ -120,7 +120,8 @@
       profile offline with DTW-based methods, runs a baseline nearest-neighbor
       match, pushes those candidates through SEARCHING/TRACKING/UNCERTAIN
       states, resolves slide commands from reference cues with look-ahead and
-      cooldown rules, and logs metrics. Real OSC delivery is still planned.
+      cooldown rules, dispatches commands through a separate queue, and can
+      send OSC JSON payloads with retry/backoff while logging metrics.
     </div>
 
     <h2>1. Fast Summary</h2>
@@ -170,7 +171,10 @@
   online tracking state machine + confidence hysteresis
         |
         v
-  timeline slide resolution + duplicate suppression + logging gateway
+  timeline slide resolution + duplicate suppression
+        |
+        v
+  separate command queue + logging/OSC presentation gateway
         |
         v
   RuntimeMetrics + log output + RuntimeReport</pre>
@@ -193,6 +197,7 @@
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/stabilized.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/matching/tracking.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/slides/timeline.py</span></li>
+      <li><span class="file-ref">src/lyrics_aligner/adapters/presentation/osc_gateway.py</span></li>
       <li><span class="file-ref">src/lyrics_aligner/adapters/presentation/logging_gateway.py</span></li>
       <li><span class="file-ref">tools/offline_align.py</span></li>
     </ol>
@@ -226,8 +231,8 @@
           audio adapters plus deterministic and ONNX-backed feature extractor
           adapters, a filesystem-backed reference profile adapter, a
           nearest-neighbor matcher adapter, a tracking wrapper, a timeline
-          slide resolver, a logging presentation gateway, and an offline
-          alignment workflow.
+          slide resolver, logging and OSC presentation gateways, and an
+          offline alignment workflow.
         </p>
       </div>
       <div class="card">
@@ -271,6 +276,7 @@
       <li><code>_build_feature_extractor()</code> returns a <code>FeatureExtractor</code>.</li>
       <li><code>_build_feature_matcher()</code> returns a baseline matcher wrapped in the Sprint 5 tracking state machine when a reference profile is present.</li>
       <li><code>_build_slide_resolver()</code> returns a timeline resolver when the profile contains slide cues.</li>
+      <li><code>_build_presentation_gateway()</code> chooses logging, OSC, both, or manual override.</li>
       <li><code>AudioIngestionRuntime(...)</code> is created.</li>
       <li><code>runtime.run()</code> starts producer/consumer processing.</li>
       <li>A final summary log line is emitted from the returned report.</li>
@@ -294,6 +300,8 @@
       <li><code>audio_source</code>: selects <code>simulated</code> or <code>microphone</code></li>
       <li><code>feature_extractor</code>: selects <code>simulated</code> or <code>onnx</code></li>
       <li><code>reference_profile_path</code>: directory containing prepared reference features and metadata</li>
+      <li><code>presentation_mode</code>: selects <code>none</code>, <code>logging</code>, <code>osc</code>, or <code>both</code></li>
+      <li><code>manual_override</code>: disables presentation output while leaving tracking active</li>
       <li><code>match_confidence_threshold</code>: minimum confidence required to accept a match</li>
       <li><code>match_max_forward_jump_frames</code>: largest forward jump the tracker accepts while staying locked</li>
       <li><code>tracking_lost_match_patience</code>: how many bad frames are tolerated before dropping back to searching</li>
@@ -304,12 +312,15 @@
       <li><code>channels</code>: currently expected to be mono for the main path</li>
       <li><code>block_size</code>: samples per chunk</li>
       <li><code>audio_queue_capacity</code>: bounded queue size in the runtime</li>
+      <li><code>presentation_command_queue_capacity</code>: bounded queue size for non-blocking slide dispatch</li>
       <li><code>input_device</code>: microphone device name or index</li>
       <li><code>feature_model_path</code>: ONNX model path when ONNX extraction is selected</li>
       <li><code>simulation_duration_seconds</code>: simulated stream length</li>
       <li><code>diagnostics_interval_seconds</code>: log cadence</li>
       <li><code>silence_threshold_rms</code>: threshold for silent chunk counting</li>
       <li><code>clipping_threshold_peak</code>: threshold for clipped chunk counting</li>
+      <li><code>osc_host</code>, <code>osc_port</code>, <code>osc_path</code>: OSC destination</li>
+      <li><code>osc_retry_count</code>, <code>osc_retry_backoff_seconds</code>: retry policy for temporary send failures</li>
     </ul>
 
     <h3>Env Var Precedence</h3>
@@ -688,7 +699,7 @@ feature_frames_processed=...</pre>
     <ul>
       <li>offline alignment is still a baseline DTW implementation</li>
       <li>live tracking is still a simple nearest-neighbor plus heuristics path</li>
-      <li>slide output currently goes to a logging gateway, not a real OSC transport</li>
+      <li>OSC delivery now exists, but it still needs real-room pilot tuning and presentation-client validation</li>
     </ul>
     <p>
       So if you are trying to understand “where the intelligent lyrics

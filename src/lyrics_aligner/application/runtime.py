@@ -69,6 +69,58 @@ class BoundedAudioQueue:
             self._condition.notify_all()
 
 
+class BoundedCommandQueue:
+    """Thread-safe queue for slide commands with drop-oldest backpressure."""
+
+    def __init__(self, capacity: int) -> None:
+        if capacity <= 0:
+            raise ValueError("capacity must be greater than zero")
+        self._capacity = capacity
+        self._items: deque[SlideCommand] = deque()
+        self._condition = Condition()
+        self._closed = False
+
+    @property
+    def capacity(self) -> int:
+        return self._capacity
+
+    def put_drop_oldest(self, item: SlideCommand) -> bool:
+        with self._condition:
+            dropped = False
+            if len(self._items) == self._capacity:
+                self._items.popleft()
+                dropped = True
+            self._items.append(item)
+            self._condition.notify()
+            return dropped
+
+    def get(self, timeout: float | None = None) -> SlideCommand | None:
+        with self._condition:
+            if timeout is None:
+                while not self._items and not self._closed:
+                    self._condition.wait()
+            else:
+                deadline = monotonic() + timeout
+                while not self._items and not self._closed:
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        return None
+                    self._condition.wait(remaining)
+
+            if self._items:
+                return self._items.popleft()
+            return None
+
+    def qsize(self) -> int:
+        with self._condition:
+            return len(self._items)
+
+    def close(self) -> None:
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeReport:
     device_name: str
@@ -77,6 +129,8 @@ class RuntimeReport:
     peak: float
     queue_size: int
     queue_capacity: int
+    command_queue_size: int
+    command_queue_capacity: int
     tracking_state: str | None
     last_match: MatchResult | None
     last_slide_command: SlideCommand | None
@@ -98,9 +152,11 @@ class AudioIngestionRuntime:
         device_name: str = "SimulatedAudioSource",
         silence_threshold_rms: float = 0.01,
         clipping_threshold_peak: float = 0.99,
+        command_queue_capacity: int = 8,
     ) -> None:
         self._source = source
         self._queue = BoundedAudioQueue(queue_capacity)
+        self._command_queue = BoundedCommandQueue(command_queue_capacity)
         self._logger = logger
         self._feature_extractor = feature_extractor
         self._feature_matcher = feature_matcher
@@ -120,7 +176,9 @@ class AudioIngestionRuntime:
 
     def run(self) -> RuntimeReport:
         producer = Thread(target=self._produce, name="audio-producer", daemon=True)
+        dispatcher = Thread(target=self._dispatch_commands, name="slide-dispatcher", daemon=True)
         producer.start()
+        dispatcher.start()
 
         next_report_at = monotonic() + self._diagnostics_interval_seconds
         try:
@@ -135,6 +193,7 @@ class AudioIngestionRuntime:
         finally:
             self.stop()
             producer.join()
+            dispatcher.join()
 
         self._log_diagnostics()
         return RuntimeReport(
@@ -144,6 +203,8 @@ class AudioIngestionRuntime:
             peak=self._last_peak,
             queue_size=self._queue.qsize(),
             queue_capacity=self._queue.capacity,
+            command_queue_size=self._command_queue.qsize(),
+            command_queue_capacity=self._command_queue.capacity,
             tracking_state=self._tracking_state(),
             last_match=self._last_match,
             last_slide_command=self._last_slide_command,
@@ -152,6 +213,7 @@ class AudioIngestionRuntime:
     def stop(self) -> None:
         self._stop_requested.set()
         self._queue.close()
+        self._command_queue.close()
         stop_method = getattr(self._source, "stop", None)
         if callable(stop_method):
             stop_method()
@@ -189,6 +251,7 @@ class AudioIngestionRuntime:
         metrics = self._snapshot_metrics()
         self._logger.info(
             "device=%s rms=%.2f peak=%.2f queue=%s/%s "
+            "command_queue=%s/%s "
             "chunks_received=%s chunks_dropped=%s "
             "silent_chunks=%s clipped_chunks=%s feature_frames_processed=%s "
             "accepted_matches=%s low_confidence_matches=%s slide_triggers_sent=%s "
@@ -199,6 +262,8 @@ class AudioIngestionRuntime:
             self._last_peak,
             self._queue.qsize(),
             self._queue.capacity,
+            self._command_queue.qsize(),
+            self._command_queue.capacity,
             metrics.chunks_received,
             metrics.chunks_dropped,
             metrics.silent_chunks,
@@ -256,21 +321,33 @@ class AudioIngestionRuntime:
             with self._metrics_lock:
                 self._metrics.slide_triggers_sent += 1
             return
-
-        try:
-            self._presentation_gateway.send(command)
-        except Exception:
-            self._logger.exception(
-                "Failed to send slide command slide_number=%s section=%s",
-                command.slide_number,
-                command.section,
+        dropped = self._command_queue.put_drop_oldest(command)
+        if dropped:
+            self._logger.warning(
+                "Presentation command queue full; dropped oldest queued command"
             )
-            with self._metrics_lock:
-                self._metrics.osc_send_failures += 1
-            return
 
-        with self._metrics_lock:
-            self._metrics.slide_triggers_sent += 1
+    def _dispatch_commands(self) -> None:
+        while not self._stop_requested.is_set() or self._command_queue.qsize() > 0:
+            command = self._command_queue.get(timeout=0.1)
+            if command is None:
+                continue
+
+            try:
+                if self._presentation_gateway is not None:
+                    self._presentation_gateway.send(command)
+            except Exception:
+                self._logger.exception(
+                    "Failed to send slide command slide_number=%s section=%s",
+                    command.slide_number,
+                    command.section,
+                )
+                with self._metrics_lock:
+                    self._metrics.osc_send_failures += 1
+                continue
+
+            with self._metrics_lock:
+                self._metrics.slide_triggers_sent += 1
 
     def _tracking_state(self) -> str | None:
         if self._feature_matcher is None:

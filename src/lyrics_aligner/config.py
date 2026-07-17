@@ -34,6 +34,8 @@ class AppConfig:
     audio_source: str = "simulated"
     feature_extractor: str = "simulated"
     reference_profile_path: str | None = None
+    presentation_mode: str = "logging"
+    manual_override: bool = False
     match_confidence_threshold: float = 0.6
     match_max_forward_jump_frames: int = 4
     match_large_jump_threshold_frames: int = 2
@@ -43,6 +45,7 @@ class AppConfig:
     slide_lookahead_seconds: float = 0.2
     slide_trigger_cooldown_seconds: float = 0.5
     slide_consecutive_match_count: int = 2
+    presentation_command_queue_capacity: int = 8
     sample_rate: int = 16_000
     channels: int = 1
     block_size: int = 4_096
@@ -56,6 +59,8 @@ class AppConfig:
     osc_host: str = "127.0.0.1"
     osc_port: int = 7_000
     osc_path: str = "/presentation/trigger-slide"
+    osc_retry_count: int = 2
+    osc_retry_backoff_seconds: float = 0.05
 
     @classmethod
     def from_env(cls) -> AppConfig:
@@ -63,6 +68,9 @@ class AppConfig:
             audio_source=_read_str("LYRICS_ALIGNER_AUDIO_SOURCE", "simulated"),
             feature_extractor=_read_str("LYRICS_ALIGNER_FEATURE_EXTRACTOR", "simulated"),
             reference_profile_path=os.getenv("LYRICS_ALIGNER_REFERENCE_PROFILE_PATH"),
+            presentation_mode=_read_str("LYRICS_ALIGNER_PRESENTATION_MODE", "logging"),
+            manual_override=_read_str("LYRICS_ALIGNER_MANUAL_OVERRIDE", "0")
+            in {"1", "true", "TRUE", "yes", "YES"},
             match_confidence_threshold=_read_float(
                 "LYRICS_ALIGNER_MATCH_CONFIDENCE_THRESHOLD",
                 0.6,
@@ -99,6 +107,10 @@ class AppConfig:
                 "LYRICS_ALIGNER_SLIDE_CONSECUTIVE_MATCH_COUNT",
                 2,
             ),
+            presentation_command_queue_capacity=_read_int(
+                "LYRICS_ALIGNER_PRESENTATION_COMMAND_QUEUE_CAPACITY",
+                8,
+            ),
             sample_rate=_read_int("LYRICS_ALIGNER_SAMPLE_RATE", 16_000),
             channels=_read_int("LYRICS_ALIGNER_CHANNELS", 1),
             block_size=_read_int("LYRICS_ALIGNER_BLOCK_SIZE", 4_096),
@@ -126,5 +138,10 @@ class AppConfig:
             osc_path=_read_str(
                 "LYRICS_ALIGNER_OSC_PATH",
                 "/presentation/trigger-slide",
+            ),
+            osc_retry_count=_read_int("LYRICS_ALIGNER_OSC_RETRY_COUNT", 2),
+            osc_retry_backoff_seconds=_read_float(
+                "LYRICS_ALIGNER_OSC_RETRY_BACKOFF_SECONDS",
+                0.05,
             ),
         )

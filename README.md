@@ -196,6 +196,23 @@ The slide resolver now adds:
 - duplicate suppression
 - trigger cooldown between slide commands
 
+## Sprint 6 OSC Integration And End-To-End MVP
+
+The runtime now supports operator-selectable presentation output:
+
+- `logging` for local visibility
+- `osc` for real UDP OSC delivery
+- `both` for console plus OSC
+- `none` or `--manual-override` to keep tracking active without sending slides
+
+The presentation path now adds:
+
+- a non-blocking command queue separate from audio ingestion
+- JSON payload serialization for outgoing OSC messages
+- retry with backoff on temporary UDP send failures
+- startup validation for OSC configuration
+- runtime health summaries including audio, alignment, and presentation status
+
 ## Testing The Current Sprint
 
 Quality checks:
@@ -322,6 +339,59 @@ Expected tracking behavior:
 - repeated recovery matches return the runtime to `TRACKING`
 - low confidence freezes slide output instead of advancing slides
 
+Manual OSC delivery test:
+
+```bash
+.venv/bin/python - <<'PY'
+import socket
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(("127.0.0.1", 7000))
+print("listening on udp/7000")
+data, address = sock.recvfrom(4096)
+print("from", address)
+print(data)
+PY
+```
+
+In a second shell:
+
+```bash
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor simulated \
+  --reference-profile-path /tmp/reference-profile \
+  --presentation-mode osc \
+  --osc-host 127.0.0.1 \
+  --osc-port 7000 \
+  --osc-path /presentation/trigger-slide \
+  --simulation-duration-seconds 5.0
+```
+
+Expected behavior:
+
+- the UDP listener receives OSC packets
+- runtime continues tracking even if the receiver is restarted
+- `osc_send_failures` stays at `0` when the receiver is available
+- the final logs include the health summary line with `PRESENTATION: OSC`
+
+Manual override test:
+
+```bash
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source simulated \
+  --feature-extractor simulated \
+  --reference-profile-path /tmp/reference-profile \
+  --manual-override \
+  --simulation-duration-seconds 5.0
+```
+
+Expected behavior:
+
+- matching and tracking still run normally
+- no OSC or logging slide output is sent
+- the final health summary shows `PRESENTATION: MANUAL_OVERRIDE`
+
 Manual slide-trigger test:
 
 ```bash
@@ -421,7 +491,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the repo's documentation and PR expec
 
 Sprint 1 established the architecture, configuration, runtime ingestion, diagnostics, CI, and test foundation.
 
-The current code now spans the planned work through Sprint 5:
+The current code now spans the planned work through Sprint 6:
 
 - deterministic feature extraction from `AudioChunk` to `FeatureFrame`
 - ONNX-backed feature extraction behind the same `FeatureExtractor` port
@@ -433,10 +503,12 @@ The current code now spans the planned work through Sprint 5:
 - recovery hysteresis after low-confidence or implausible jumps
 - slide resolution from stable matches to `SlideCommand`
 - slide-boundary confirmation, duplicate suppression, cue look-ahead, and cooldown
-- logging presentation gateway for local slide-trigger visibility
+- logging, OSC, or combined presentation gateways
+- non-blocking presentation command dispatch queue
+- OSC JSON payload delivery with retry/backoff
+- operator manual override and presentation mode selection
+- runtime health summary output
 - runtime accounting for `feature_frames_processed`
 - invalid feature frame detection via `invalid_inference_outputs`
 - match accounting via `accepted_matches` and `low_confidence_matches`
 - slide trigger accounting via `slide_triggers_sent` and `osc_send_failures`
-
-Real OSC delivery remains Sprint 6 follow-up work.
