@@ -5,6 +5,7 @@ from collections import deque
 from dataclasses import dataclass
 from threading import Condition, Event, Lock, Thread
 from time import monotonic
+from typing import Protocol
 
 import numpy as np
 
@@ -121,6 +122,36 @@ class BoundedCommandQueue:
             self._condition.notify_all()
 
 
+class ManualOverrideController:
+    """Thread-safe controller for operator handoff between automatic and manual mode."""
+
+    def __init__(self, active: bool = False) -> None:
+        self._active = active
+        self._lock = Lock()
+
+    @property
+    def is_active(self) -> bool:
+        with self._lock:
+            return self._active
+
+    def activate(self) -> bool:
+        with self._lock:
+            changed = not self._active
+            self._active = True
+            return changed
+
+    def deactivate(self) -> bool:
+        with self._lock:
+            changed = self._active
+            self._active = False
+            return changed
+
+    def toggle(self) -> bool:
+        with self._lock:
+            self._active = not self._active
+            return self._active
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeReport:
     device_name: str
@@ -131,9 +162,42 @@ class RuntimeReport:
     queue_capacity: int
     command_queue_size: int
     command_queue_capacity: int
+    manual_override_active: bool
     tracking_state: str | None
     last_match: MatchResult | None
     last_slide_command: SlideCommand | None
+    current_section_key: str | None = None
+    current_section_label: str | None = None
+    current_section_slide_number: int | None = None
+    recovery_active: bool = False
+    suggested_section_key: str | None = None
+    suggested_section_label: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeStatusSnapshot:
+    device_name: str
+    metrics: RuntimeMetrics
+    rms: float
+    peak: float
+    queue_size: int
+    queue_capacity: int
+    command_queue_size: int
+    command_queue_capacity: int
+    manual_override_active: bool
+    tracking_state: str | None
+    last_match: MatchResult | None
+    last_slide_command: SlideCommand | None
+    current_section_key: str | None = None
+    current_section_label: str | None = None
+    current_section_slide_number: int | None = None
+    recovery_active: bool = False
+    suggested_section_key: str | None = None
+    suggested_section_label: str | None = None
+
+
+class RuntimeStatusObserver(Protocol):
+    def update(self, snapshot: RuntimeStatusSnapshot) -> None: ...
 
 
 class AudioIngestionRuntime:
@@ -152,7 +216,12 @@ class AudioIngestionRuntime:
         device_name: str = "SimulatedAudioSource",
         silence_threshold_rms: float = 0.01,
         clipping_threshold_peak: float = 0.99,
+        silence_reset_chunk_count: int = 3,
         command_queue_capacity: int = 8,
+        manual_override_controller: ManualOverrideController | None = None,
+        status_observer: RuntimeStatusObserver | None = None,
+        emit_diagnostic_logs: bool = True,
+        emit_match_debug_logs: bool = False,
     ) -> None:
         self._source = source
         self._queue = BoundedAudioQueue(queue_capacity)
@@ -166,11 +235,19 @@ class AudioIngestionRuntime:
         self._device_name = device_name
         self._silence_threshold_rms = silence_threshold_rms
         self._clipping_threshold_peak = clipping_threshold_peak
+        self._silence_reset_chunk_count = silence_reset_chunk_count
+        self._manual_override_controller = (
+            manual_override_controller or ManualOverrideController()
+        )
+        self._status_observer = status_observer
+        self._emit_diagnostic_logs = emit_diagnostic_logs
+        self._emit_match_debug_logs = emit_match_debug_logs
         self._metrics = RuntimeMetrics()
         self._metrics_lock = Lock()
         self._stop_requested = Event()
         self._last_rms = 0.0
         self._last_peak = 0.0
+        self._consecutive_silent_chunks = 0
         self._last_match: MatchResult | None = None
         self._last_slide_command: SlideCommand | None = None
 
@@ -188,26 +265,34 @@ class AudioIngestionRuntime:
                     self._process(chunk)
 
                 if monotonic() >= next_report_at:
-                    self._log_diagnostics()
+                    self._publish_status()
                     next_report_at = monotonic() + self._diagnostics_interval_seconds
         finally:
             self.stop()
             producer.join()
             dispatcher.join()
 
-        self._log_diagnostics()
+        self._publish_status()
+        snapshot = self._build_status_snapshot()
         return RuntimeReport(
-            device_name=self._device_name,
-            metrics=self._snapshot_metrics(),
-            rms=self._last_rms,
-            peak=self._last_peak,
-            queue_size=self._queue.qsize(),
-            queue_capacity=self._queue.capacity,
-            command_queue_size=self._command_queue.qsize(),
-            command_queue_capacity=self._command_queue.capacity,
-            tracking_state=self._tracking_state(),
-            last_match=self._last_match,
-            last_slide_command=self._last_slide_command,
+            device_name=snapshot.device_name,
+            metrics=snapshot.metrics,
+            rms=snapshot.rms,
+            peak=snapshot.peak,
+            queue_size=snapshot.queue_size,
+            queue_capacity=snapshot.queue_capacity,
+            command_queue_size=snapshot.command_queue_size,
+            command_queue_capacity=snapshot.command_queue_capacity,
+            manual_override_active=snapshot.manual_override_active,
+            tracking_state=snapshot.tracking_state,
+            last_match=snapshot.last_match,
+            last_slide_command=snapshot.last_slide_command,
+            current_section_key=snapshot.current_section_key,
+            current_section_label=snapshot.current_section_label,
+            current_section_slide_number=snapshot.current_section_slide_number,
+            recovery_active=snapshot.recovery_active,
+            suggested_section_key=snapshot.suggested_section_key,
+            suggested_section_label=snapshot.suggested_section_label,
         )
 
     def stop(self) -> None:
@@ -217,6 +302,37 @@ class AudioIngestionRuntime:
         stop_method = getattr(self._source, "stop", None)
         if callable(stop_method):
             stop_method()
+
+    def emit_operator_slide_command(self, command: SlideCommand) -> None:
+        self._last_slide_command = command
+        if self._presentation_gateway is None:
+            with self._metrics_lock:
+                self._metrics.slide_triggers_sent += 1
+            self._publish_status()
+            return
+        try:
+            self._presentation_gateway.send(command)
+        except Exception:
+            self._logger.exception(
+                "Failed to send operator slide command slide_number=%s section=%s",
+                command.slide_number,
+                command.section,
+            )
+            with self._metrics_lock:
+                self._metrics.osc_send_failures += 1
+            self._publish_status()
+            return
+        with self._metrics_lock:
+            self._metrics.slide_triggers_sent += 1
+        self._publish_status()
+
+    def force_match_anchor(self, reference_timestamp: float) -> bool:
+        force_anchor = getattr(self._feature_matcher, "force_anchor", None)
+        if not callable(force_anchor):
+            return False
+        force_anchor(reference_timestamp)
+        self._publish_status()
+        return True
 
     def _produce(self) -> None:
         try:
@@ -239,52 +355,69 @@ class AudioIngestionRuntime:
         squared = np.square(chunk.samples, dtype=np.float32)
         self._last_rms = float(np.sqrt(np.mean(squared, dtype=np.float32)))
         self._last_peak = float(np.max(np.abs(chunk.samples)))
+        is_silent = self._last_rms <= self._silence_threshold_rms
         with self._metrics_lock:
-            if self._last_rms <= self._silence_threshold_rms:
+            if is_silent:
                 self._metrics.silent_chunks += 1
             if self._last_peak >= self._clipping_threshold_peak:
                 self._metrics.clipped_chunks += 1
+        if is_silent:
+            self._consecutive_silent_chunks += 1
+            if self._consecutive_silent_chunks >= self._silence_reset_chunk_count:
+                self._reset_matching_due_to_silence()
+            return
+
+        self._consecutive_silent_chunks = 0
         if self._feature_extractor is not None:
             self._record_feature_frames(self._feature_extractor.extract(chunk))
 
-    def _log_diagnostics(self) -> None:
-        metrics = self._snapshot_metrics()
+    def _publish_status(self) -> None:
+        snapshot = self._build_status_snapshot()
+        if self._emit_diagnostic_logs:
+            self._log_diagnostics(snapshot)
+        if self._status_observer is not None:
+            self._status_observer.update(snapshot)
+
+    def _log_diagnostics(self, snapshot: RuntimeStatusSnapshot) -> None:
         self._logger.info(
             "device=%s rms=%.2f peak=%.2f queue=%s/%s "
             "command_queue=%s/%s "
             "chunks_received=%s chunks_dropped=%s "
             "silent_chunks=%s clipped_chunks=%s feature_frames_processed=%s "
             "accepted_matches=%s low_confidence_matches=%s slide_triggers_sent=%s "
+            "manual_override_suppressed=%s "
             "osc_send_failures=%s tracking_state=%s last_reference_timestamp=%s "
-            "last_slide_number=%s last_confidence=%.2f",
-            self._device_name,
-            self._last_rms,
-            self._last_peak,
-            self._queue.qsize(),
-            self._queue.capacity,
-            self._command_queue.qsize(),
-            self._command_queue.capacity,
-            metrics.chunks_received,
-            metrics.chunks_dropped,
-            metrics.silent_chunks,
-            metrics.clipped_chunks,
-            metrics.feature_frames_processed,
-            metrics.accepted_matches,
-            metrics.low_confidence_matches,
-            metrics.slide_triggers_sent,
-            metrics.osc_send_failures,
-            self._tracking_state() or "none",
+            "last_slide_number=%s last_confidence=%.2f manual_override=%s",
+            snapshot.device_name,
+            snapshot.rms,
+            snapshot.peak,
+            snapshot.queue_size,
+            snapshot.queue_capacity,
+            snapshot.command_queue_size,
+            snapshot.command_queue_capacity,
+            snapshot.metrics.chunks_received,
+            snapshot.metrics.chunks_dropped,
+            snapshot.metrics.silent_chunks,
+            snapshot.metrics.clipped_chunks,
+            snapshot.metrics.feature_frames_processed,
+            snapshot.metrics.accepted_matches,
+            snapshot.metrics.low_confidence_matches,
+            snapshot.metrics.slide_triggers_sent,
+            snapshot.metrics.manual_override_suppressed_triggers,
+            snapshot.metrics.osc_send_failures,
+            snapshot.tracking_state or "none",
             (
-                f"{self._last_match.reference_timestamp:.2f}"
-                if self._last_match is not None
+                f"{snapshot.last_match.reference_timestamp:.2f}"
+                if snapshot.last_match is not None
                 else "none"
             ),
             (
-                self._last_slide_command.slide_number
-                if self._last_slide_command is not None
+                snapshot.last_slide_command.slide_number
+                if snapshot.last_slide_command is not None
                 else "none"
             ),
-            self._last_match.confidence if self._last_match is not None else 0.0,
+            snapshot.last_match.confidence if snapshot.last_match is not None else 0.0,
+            "active" if snapshot.manual_override_active else "auto",
         )
 
     def _record_feature_frames(self, frames: list[FeatureFrame]) -> None:
@@ -304,6 +437,7 @@ class AudioIngestionRuntime:
             self._metrics.invalid_inference_outputs += invalid_frames
 
     def _record_match(self, result: MatchResult) -> None:
+        self._log_match_debug()
         self._last_match = result
         with self._metrics_lock:
             if result.valid:
@@ -315,11 +449,58 @@ class AudioIngestionRuntime:
             if command is not None:
                 self._emit_slide_command(command)
 
+    def _log_match_debug(self) -> None:
+        if not self._emit_match_debug_logs or self._feature_matcher is None:
+            return
+        decision = getattr(self._feature_matcher, "last_decision", None)
+        if decision is None:
+            return
+        self._logger.info(
+            "MATCH_DEBUG prev_state=%s state=%s accepted=%s reason=%s "
+            "frame=%s timestamp=%.2f confidence=%.2f candidate_valid=%s delta=%s "
+            "matcher_reason=%s second_gap=%s second_time_gap=%s",
+            decision.previous_state,
+            decision.state,
+            decision.accepted,
+            decision.reason,
+            decision.candidate_frame,
+            decision.candidate_timestamp,
+            decision.candidate_confidence,
+            decision.candidate_valid,
+            (
+                decision.delta_from_last_accepted
+                if decision.delta_from_last_accepted is not None
+                else "none"
+            ),
+            decision.matcher_reason or "none",
+            (
+                f"{decision.matcher_second_distance_gap:.4f}"
+                if decision.matcher_second_distance_gap is not None
+                else "none"
+            ),
+            (
+                f"{decision.matcher_second_time_gap_seconds:.2f}"
+                if decision.matcher_second_time_gap_seconds is not None
+                else "none"
+            ),
+        )
+
+    def _reset_matching_due_to_silence(self) -> None:
+        reset_method = getattr(self._feature_matcher, "reset", None)
+        if callable(reset_method):
+            reset_method()
+        self._last_match = None
+
     def _emit_slide_command(self, command: SlideCommand) -> None:
         self._last_slide_command = command
+        self._publish_status()
+        if self._manual_override_controller.is_active:
+            self._suppress_slide_command(command)
+            return
         if self._presentation_gateway is None:
             with self._metrics_lock:
                 self._metrics.slide_triggers_sent += 1
+            self._publish_status()
             return
         dropped = self._command_queue.put_drop_oldest(command)
         if dropped:
@@ -331,6 +512,9 @@ class AudioIngestionRuntime:
         while not self._stop_requested.is_set() or self._command_queue.qsize() > 0:
             command = self._command_queue.get(timeout=0.1)
             if command is None:
+                continue
+            if self._manual_override_controller.is_active:
+                self._suppress_slide_command(command)
                 continue
 
             try:
@@ -348,12 +532,22 @@ class AudioIngestionRuntime:
 
             with self._metrics_lock:
                 self._metrics.slide_triggers_sent += 1
+            self._publish_status()
 
     def _tracking_state(self) -> str | None:
         if self._feature_matcher is None:
             return None
         state_name = getattr(self._feature_matcher, "state_name", None)
         return state_name if isinstance(state_name, str) else None
+
+    def _suppress_slide_command(self, command: SlideCommand) -> None:
+        self._logger.info(
+            "Manual override active; suppressed slide command slide_number=%s section=%s",
+            command.slide_number,
+            command.section,
+        )
+        with self._metrics_lock:
+            self._metrics.manual_override_suppressed_triggers += 1
 
     def _snapshot_metrics(self) -> RuntimeMetrics:
         with self._metrics_lock:
@@ -367,6 +561,40 @@ class AudioIngestionRuntime:
                 low_confidence_matches=self._metrics.low_confidence_matches,
                 accepted_matches=self._metrics.accepted_matches,
                 slide_triggers_sent=self._metrics.slide_triggers_sent,
+                manual_override_suppressed_triggers=(
+                    self._metrics.manual_override_suppressed_triggers
+                ),
                 osc_send_failures=self._metrics.osc_send_failures,
                 queue_high_water_mark=self._metrics.queue_high_water_mark,
             )
+
+    def _build_status_snapshot(self) -> RuntimeStatusSnapshot:
+        controller_status = getattr(self._slide_resolver, "status", None)
+        return RuntimeStatusSnapshot(
+            device_name=self._device_name,
+            metrics=self._snapshot_metrics(),
+            rms=self._last_rms,
+            peak=self._last_peak,
+            queue_size=self._queue.qsize(),
+            queue_capacity=self._queue.capacity,
+            command_queue_size=self._command_queue.qsize(),
+            command_queue_capacity=self._command_queue.capacity,
+            manual_override_active=self._manual_override_controller.is_active,
+            tracking_state=self._tracking_state(),
+            last_match=self._last_match,
+            last_slide_command=self._last_slide_command,
+            current_section_key=getattr(controller_status, "current_section_key", None),
+            current_section_label=getattr(controller_status, "current_section_label", None),
+            current_section_slide_number=getattr(
+                controller_status, "current_slide_number", None
+            ),
+            recovery_active=bool(
+                getattr(controller_status, "recovery_active", False)
+            ),
+            suggested_section_key=getattr(
+                controller_status, "suggested_section_key", None
+            ),
+            suggested_section_label=getattr(
+                controller_status, "suggested_section_label", None
+            ),
+        )

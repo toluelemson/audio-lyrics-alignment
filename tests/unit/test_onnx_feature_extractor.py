@@ -60,8 +60,46 @@ def test_extract_normalizes_waveform_and_returns_feature_frames() -> None:
     np.testing.assert_array_equal(frames[0].values, np.array([1.0, 2.0], dtype=np.float32))
     np.testing.assert_array_equal(frames[1].values, np.array([3.0, 4.0], dtype=np.float32))
     assert frames[0].observed_at == 5.0
-    assert frames[1].observed_at == pytest.approx(5.004)
-    assert frames[0].frame_duration_seconds == pytest.approx(0.004)
+    assert frames[1].observed_at == pytest.approx(5.002)
+    assert frames[0].frame_duration_seconds == pytest.approx(0.002)
+
+
+def test_extract_splits_sequence_model_outputs_into_per_step_feature_frames() -> None:
+    session = _StubSession(
+        outputs=[
+            np.array(
+                [
+                    [
+                        [1.0, 2.0, 3.0],
+                        [4.0, 5.0, 6.0],
+                        [7.0, 8.0, 9.0],
+                    ]
+                ],
+                dtype=np.float32,
+            )
+        ]
+    )
+    extractor = OnnxFeatureExtractor(
+        OnnxFeatureExtractorConfig(model_path="dummy.onnx", sample_rate=1_000),
+        session=session,
+    )
+
+    frames = extractor.extract(
+        AudioChunk(
+            samples=np.ones(6, dtype=np.float32),
+            captured_at=2.0,
+            sequence_number=0,
+        )
+    )
+
+    assert len(frames) == 3
+    np.testing.assert_array_equal(frames[0].values, np.array([1.0, 2.0, 3.0], dtype=np.float32))
+    np.testing.assert_array_equal(frames[1].values, np.array([4.0, 5.0, 6.0], dtype=np.float32))
+    np.testing.assert_array_equal(frames[2].values, np.array([7.0, 8.0, 9.0], dtype=np.float32))
+    assert frames[0].observed_at == 2.0
+    assert frames[1].observed_at == pytest.approx(2.002)
+    assert frames[2].observed_at == pytest.approx(2.004)
+    assert frames[0].frame_duration_seconds == pytest.approx(0.002)
 
 
 def test_empty_chunk_produces_no_frames() -> None:

@@ -1,0 +1,11 @@
+{
+  "audio_path": "/Users/toluelemosho/Desktop/ResearchPapers/audio-lyrics-alignment-sprint-1/demo_assets/separated/htdemucs/amazing-grace/vocals-trimmed.wav",
+  "block_size": "4096",
+  "companion_audio_path": "/Users/toluelemosho/Desktop/ResearchPapers/audio-lyrics-alignment-sprint-1/demo_assets/amazing-grace.wav",
+  "feature_extractor": "OnnxFeatureExtractor",
+  "profile_version": "1",
+  "reference_audio_role": "vocals",
+  "sample_rate": "16000",
+  "slides_path": "/Users/toluelemosho/Desktop/ResearchPapers/audio-lyrics-alignment-sprint-1/amazing-grace-slides-trimmed.json",
+  "source_sample_rate": "44100"
+}

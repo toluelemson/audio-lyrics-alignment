@@ -12,5 +12,6 @@ class RuntimeMetrics:
     low_confidence_matches: int = 0
     accepted_matches: int = 0
     slide_triggers_sent: int = 0
+    manual_override_suppressed_triggers: int = 0
     osc_send_failures: int = 0
     queue_high_water_mark: int = 0

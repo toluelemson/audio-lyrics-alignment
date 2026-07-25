@@ -62,15 +62,8 @@ class OnnxFeatureExtractor:
         if not outputs:
             return []
 
-        features = np.asarray(outputs[0], dtype=np.float32)
-        if features.ndim == 1:
-            feature_rows = features[np.newaxis, :]
-        elif features.ndim == 2:
-            feature_rows = features
-        else:
-            feature_rows = features.reshape(features.shape[0], -1)
-
-        frame_duration = samples.size / self._config.sample_rate
+        feature_rows = self._feature_rows(np.asarray(outputs[0], dtype=np.float32))
+        frame_duration = (samples.size / self._config.sample_rate) / len(feature_rows)
         return [
             FeatureFrame(
                 values=np.array(row, dtype=np.float32, copy=True),
@@ -79,6 +72,19 @@ class OnnxFeatureExtractor:
             )
             for index, row in enumerate(feature_rows)
         ]
+
+    @staticmethod
+    def _feature_rows(features: np.ndarray) -> np.ndarray:
+        if features.ndim == 0:
+            return features.reshape(1, 1)
+        if features.ndim == 1:
+            return features[np.newaxis, :]
+        if features.ndim == 2:
+            return features
+        if features.ndim == 3:
+            batch_size, sequence_length, feature_size = features.shape
+            return features.reshape(batch_size * sequence_length, feature_size)
+        return features.reshape(features.shape[0], -1)
 
     @staticmethod
     def _create_session(model_path: str) -> InferenceSession:

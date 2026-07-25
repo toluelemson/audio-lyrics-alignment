@@ -1,6 +1,7 @@
 # Audio-to-Lyrics Alignment Engine
 
-A modular Python MVP for aligning live worship audio with a known reference performance and triggering lyric slides through OSC.
+A Python MVP that listens to one live song, estimates the current song position,
+and triggers the matching lyric slide.
 
 ## Architecture
 
@@ -12,6 +13,8 @@ The project uses a modular monolith with hexagonal boundaries:
 - `adapters`: microphone, simulation, ONNX, profile storage, and presentation integrations
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full roadmap and sprint plan.
+For the next production direction, see
+[docs/adr/003-layered-show-control-architecture.md](docs/adr/003-layered-show-control-architecture.md).
 
 ## Development
 
@@ -26,75 +29,47 @@ mypy src
 
 ## Running
 
-Simulated input:
+The runtime is intentionally streamlined to one core path:
 
-```bash
-.venv/bin/python -m lyrics_aligner.main
+```text
+WAV or microphone input
+-> ONNX feature extraction
+-> reference matching with tracking
+-> timeline slide resolution
+-> logging or OSC output
 ```
 
-Simulated input with explicit simulated feature extraction:
+Required inputs:
 
-```bash
-.venv/bin/python -m lyrics_aligner.main --audio-source simulated --feature-extractor simulated
-```
-
-ONNX feature extraction:
-
-```bash
-.venv/bin/python -m lyrics_aligner.main \
-  --audio-source simulated \
-  --feature-extractor onnx \
-  --feature-model-path /absolute/path/to/model.onnx
-```
-
-With a prepared reference profile directory:
-
-```bash
-.venv/bin/python -m lyrics_aligner.main \
-  --audio-source simulated \
-  --feature-extractor onnx \
-  --feature-model-path /absolute/path/to/model.onnx \
-  --reference-profile-path /absolute/path/to/reference-profile
-```
-
-With baseline matching against the loaded reference profile:
-
-```bash
-.venv/bin/python -m lyrics_aligner.main \
-  --audio-source simulated \
-  --feature-extractor simulated \
-  --reference-profile-path /absolute/path/to/reference-profile \
-  --match-confidence-threshold 0.6
-```
-
-With simple match stabilization:
-
-```bash
-.venv/bin/python -m lyrics_aligner.main \
-  --audio-source simulated \
-  --feature-extractor simulated \
-  --reference-profile-path /absolute/path/to/reference-profile \
-  --match-confidence-threshold 0.6 \
-  --match-max-forward-jump-frames 4 \
-  --match-large-jump-threshold-frames 2 \
-  --match-confirmation-count 2
-```
-
-Relevant runtime selectors:
-
-- `--audio-source simulated|microphone`
-- `--feature-extractor simulated|onnx`
-- `--feature-model-path /absolute/path/to/model.onnx` when using `onnx`
 - `--reference-profile-path /absolute/path/to/reference-profile`
-- `--match-confidence-threshold 0.0-1.0`
-- `--match-max-forward-jump-frames`
-- `--match-large-jump-threshold-frames`
-- `--match-confirmation-count`
+- `--feature-model-path /absolute/path/to/model.onnx`
+
+Supported audio inputs:
+
+- `--audio-source wav --audio-file-path /absolute/path/to/file.wav`
+- `--audio-source microphone --input-device "Built-in Microphone"`
+
+Supported outputs:
+
+- `--presentation-mode logging`
+- `--presentation-mode osc`
+- `--presentation-mode none`
 
 Microphone input:
 
 ```bash
 .venv/bin/python -m lyrics_aligner.main --audio-source microphone --input-device "Built-in Microphone"
+```
+
+WAV replay input:
+
+```bash
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source wav \
+  --audio-file-path demo_assets/onnx_demo_song.wav \
+  --feature-model-path models/wav2vec2-base.onnx \
+  --reference-profile-path profiles/demo-wav2vec2 \
+  --presentation-mode logging
 ```
 
 Environment variables are also supported:
@@ -105,17 +80,22 @@ export LYRICS_ALIGNER_INPUT_DEVICE="Built-in Microphone"
 .venv/bin/python -m lyrics_aligner.main
 ```
 
-Feature extraction can also be configured with environment variables:
+WAV replay can also be configured with environment variables:
 
 ```bash
-export LYRICS_ALIGNER_FEATURE_EXTRACTOR=onnx
+export LYRICS_ALIGNER_AUDIO_SOURCE=wav
+export LYRICS_ALIGNER_AUDIO_FILE_PATH=/absolute/path/to/file.wav
+.venv/bin/python -m lyrics_aligner.main
+```
+
+The same core runtime can be configured with environment variables:
+
+```bash
 export LYRICS_ALIGNER_FEATURE_MODEL_PATH=/absolute/path/to/model.onnx
 export LYRICS_ALIGNER_REFERENCE_PROFILE_PATH=/absolute/path/to/reference-profile
 export LYRICS_ALIGNER_MATCH_CONFIDENCE_THRESHOLD=0.6
-export LYRICS_ALIGNER_MATCH_MAX_FORWARD_JUMP_FRAMES=4
-export LYRICS_ALIGNER_MATCH_LARGE_JUMP_THRESHOLD_FRAMES=2
 export LYRICS_ALIGNER_MATCH_CONFIRMATION_COUNT=2
-.venv/bin/python -m lyrics_aligner.main --audio-source simulated
+.venv/bin/python -m lyrics_aligner.main --audio-source wav --audio-file-path /absolute/path/to/file.wav
 ```
 
 Prepared reference profile directory contents:
@@ -127,12 +107,36 @@ Prepared reference profile directory contents:
 
 ## Sprint 3 Reference Builder
 
-Build a reusable reference profile from a WAV file and slide cue JSON:
+Build a reusable reference profile from a WAV file and a slide cue JSON file
+captured from user slide-change clicks:
+
+1. Generate or prepare the slide order file with `slide_number`, `section`, and
+   `lyrics`.
+2. Play the reference song once and capture user click timings.
+3. Build the reference profile from the audio plus captured click JSON.
+
+Generate a slide-order scaffold from plain lyrics:
 
 ```bash
-python tools/build_reference.py \
-  --audio amazing-grace.wav \
+.venv/bin/python tools/generate_slide_cues.py \
+  --lyrics amazing-grace.txt \
+  --output amazing-grace-slides.json
+```
+
+Capture click timings in the terminal while the song plays:
+
+```bash
+.venv/bin/python tools/capture_slide_clicks.py \
   --slides amazing-grace-slides.json \
+  --output amazing-grace-clicks.json
+```
+
+Then build the profile:
+
+```bash
+.venv/bin/python tools/build_reference.py \
+  --audio amazing-grace.wav \
+  --slides amazing-grace-clicks.json \
   --output profiles/amazing-grace
 ```
 
@@ -142,6 +146,8 @@ Optional selectors:
 - `--feature-extractor simulated|onnx`
 - `--feature-model-path /absolute/path/to/model.onnx` when using `onnx`
 - `--block-size 4096`
+- `--audio-role mixed|vocals|instrumental|other`
+- `--companion-audio /absolute/path/to/original-mix.wav`
 
 The builder:
 
@@ -149,8 +155,30 @@ The builder:
 - converts stereo to mono when needed
 - resamples to `16 kHz`
 - runs offline feature extraction
-- validates slide timestamps
+- uses recorded click times as the slide timings
 - writes `profile.json`, `reference_features.npy`, and `metadata.json`
+
+The slide cue input should contain slide content plus `click_timestamp` for
+each slide. Older `reference_timestamp` files are still accepted for backward
+compatibility, but new reference prep should come from recorded user clicks.
+
+For live tracking, the most reliable setup is a vocals-only reference profile.
+If you can export or obtain a vocal stem, build the profile from that stem and
+keep the full mix only as companion metadata:
+
+```bash
+.venv/bin/python tools/build_vocal_reference.py \
+  --vocals demo_assets/amazing-grace-vocals.wav \
+  --mix demo_assets/amazing-grace.wav \
+  --slides demo_assets/amazing-grace-clicks.json \
+  --output profiles/amazing-grace-vocals \
+  --feature-extractor onnx \
+  --feature-model-path models/wav2vec2-base.onnx
+```
+
+That helper stores the profile as `reference_audio_role=vocals`, which makes it
+clear that live matching should be judged against sung content rather than the
+full arrangement.
 
 ## Sprint 4 Offline Alignment
 
@@ -201,6 +229,7 @@ The slide resolver now adds:
 The runtime now supports operator-selectable presentation output:
 
 - `logging` for local visibility
+- `terminal` for a live in-terminal verse view with the current section highlighted
 - `osc` for real UDP OSC delivery
 - `both` for console plus OSC
 - `none` or `--manual-override` to keep tracking active without sending slides
@@ -234,6 +263,18 @@ Manual simulated runtime test:
 
 ```bash
 .venv/bin/python -m lyrics_aligner.main --audio-source simulated --simulation-duration-seconds 5.0
+```
+
+Manual live BlackHole test with terminal verse view:
+
+```bash
+.venv/bin/python -m lyrics_aligner.main \
+  --audio-source microphone \
+  --input-device "BlackHole 2ch" \
+  --feature-extractor onnx \
+  --feature-model-path models/wav2vec2-base.onnx \
+  --reference-profile-path profiles/amazing-grace-vocals \
+  --presentation-mode terminal
 ```
 
 Expected behavior:
@@ -389,8 +430,9 @@ Manual override test:
 Expected behavior:
 
 - matching and tracking still run normally
-- no OSC or logging slide output is sent
-- the final health summary shows `PRESENTATION: MANUAL_OVERRIDE`
+- slide commands are suppressed until the operator switches back to `auto`
+- the final health summary shows `PRESENTATION: MANUAL_OVERRIDE` while override remains active
+- type `manual`, `auto`, `toggle`, `status`, or `help` in the terminal to control handoff at runtime
 
 Manual slide-trigger test:
 
@@ -454,6 +496,41 @@ Expected behavior:
 - `profiles/amazing-grace/reference_features.npy` is created
 - `profiles/amazing-grace/metadata.json` is created
 - rerunning the command with the same inputs produces the same feature shape
+
+ONNX-backed demo profile test:
+
+```bash
+.venv/bin/python tools/generate_demo_reference_assets.py --output-dir demo_assets
+.venv/bin/python tools/build_reference.py \
+  --audio demo_assets/onnx_demo_song.wav \
+  --slides demo_assets/onnx_demo_slides.json \
+  --output profiles/demo-wav2vec2 \
+  --feature-extractor onnx \
+  --feature-model-path models/wav2vec2-base.onnx
+```
+
+Expected behavior:
+
+- the generator creates `demo_assets/onnx_demo_song.wav`
+- the generator creates `demo_assets/onnx_demo_slides.json`
+- the builder writes `profiles/demo-wav2vec2/profile.json`
+- `reference_features.npy` has a real ONNX-derived feature matrix
+- the printed summary reports a non-zero `frames` count and feature size `768`
+
+Plain lyrics to cue-template test:
+
+```bash
+python tools/generate_slide_cues.py \
+  --lyrics amazing-grace.txt \
+  --output amazing-grace-slides.json \
+  --timestamp-step 20
+```
+
+Expected behavior:
+
+- the command reads section headings like `**Verse 1**`
+- the output JSON contains slide entries with placeholder ascending timestamps
+- users only need to adjust timestamps instead of hand-writing the full JSON structure
 
 Manual Sprint 4 offline alignment test:
 

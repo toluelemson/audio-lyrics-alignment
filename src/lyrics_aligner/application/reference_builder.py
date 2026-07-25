@@ -12,6 +12,7 @@ from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 
 PROFILE_VERSION = "1"
 TARGET_SAMPLE_RATE = 16_000
+SUPPORTED_REFERENCE_AUDIO_ROLES = ("mixed", "vocals", "instrumental", "other")
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +66,15 @@ class ReferenceProfileBuilder:
         audio_path: str,
         slides_path: str,
         profile_name: str,
+        *,
+        audio_role: str = "mixed",
+        companion_audio_path: str | None = None,
     ) -> BuiltReferenceProfile:
+        if audio_role not in SUPPORTED_REFERENCE_AUDIO_ROLES:
+            raise ValueError(
+                "audio_role must be one of "
+                f"{SUPPORTED_REFERENCE_AUDIO_ROLES!r}"
+            )
         samples, source_sample_rate = load_wav_mono(audio_path)
         if source_sample_rate != self._config.sample_rate:
             samples = resample_audio(samples, source_sample_rate, self._config.sample_rate)
@@ -98,9 +107,14 @@ class ReferenceProfileBuilder:
             "sample_rate": str(self._config.sample_rate),
             "block_size": str(self._config.block_size),
             "source_sample_rate": str(source_sample_rate),
+            "reference_audio_role": audio_role,
             "audio_path": str(Path(audio_path).resolve()),
             "slides_path": str(Path(slides_path).resolve()),
         }
+        if companion_audio_path is not None:
+            metadata["companion_audio_path"] = str(
+                Path(companion_audio_path).expanduser().resolve()
+            )
         return BuiltReferenceProfile(
             name=profile_name,
             frame_duration_seconds=frame_duration_seconds,
@@ -235,6 +249,7 @@ def load_slide_intervals(
         slide_number = entry.get("slide_number")
         section = entry.get("section")
         lyrics = entry.get("lyrics")
+        click_timestamp = entry.get("click_timestamp")
         reference_timestamp = entry.get("reference_timestamp")
         if isinstance(slide_number, bool) or not isinstance(slide_number, int) or slide_number <= 0:
             raise ValueError("slide_number must be a positive integer")
@@ -242,13 +257,19 @@ def load_slide_intervals(
             raise ValueError("section must be a non-empty string")
         if not isinstance(lyrics, str) or not lyrics.strip():
             raise ValueError("lyrics must be a non-empty string")
-        if not isinstance(reference_timestamp, (int, float)) or reference_timestamp < 0:
-            raise ValueError("reference_timestamp must be a non-negative number")
-        timestamp = float(reference_timestamp)
+        if isinstance(click_timestamp, (int, float)) and click_timestamp >= 0:
+            timestamp = float(click_timestamp)
+        elif isinstance(reference_timestamp, (int, float)) and reference_timestamp >= 0:
+            timestamp = float(reference_timestamp)
+        else:
+            raise ValueError(
+                "slide timing must include a non-negative click_timestamp "
+                "or reference_timestamp"
+            )
         if timestamp > total_duration_seconds:
-            raise ValueError("reference_timestamp must not exceed the audio duration")
+            raise ValueError("slide timing must not exceed the audio duration")
         if timestamp < last_timestamp:
-            raise ValueError("slide reference_timestamp values must be sorted ascending")
+            raise ValueError("slide timing values must be sorted ascending")
         validated.append((slide_number, section.strip(), lyrics, timestamp))
         last_timestamp = timestamp
 

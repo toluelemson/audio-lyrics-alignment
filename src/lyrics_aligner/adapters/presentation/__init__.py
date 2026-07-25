@@ -1,6 +1,5 @@
 """Presentation gateway adapters."""
 
-from lyrics_aligner.adapters.presentation.composite_gateway import CompositePresentationGateway
 from lyrics_aligner.adapters.presentation.logging_gateway import LoggingPresentationGateway
 from lyrics_aligner.adapters.presentation.osc_gateway import (
     OscPresentationGateway,
@@ -8,7 +7,6 @@ from lyrics_aligner.adapters.presentation.osc_gateway import (
 )
 
 __all__ = [
-    "CompositePresentationGateway",
     "LoggingPresentationGateway",
     "OscPresentationGateway",
     "OscPresentationGatewayConfig",

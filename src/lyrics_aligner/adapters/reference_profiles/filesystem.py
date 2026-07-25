@@ -62,6 +62,7 @@ class FilesystemReferenceProfileRepository:
             for observed_at, row in zip(timestamp_values, features, strict=True)
         )
         slide_cues = self._read_slide_cues(profile_data.get("slides"))
+        metadata["profile_path"] = str(base_path)
         return ReferenceProfile(
             name=name.strip(),
             frames=frames,

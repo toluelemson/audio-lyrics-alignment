@@ -4,9 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from lyrics_aligner.adapters.reference_profiles import (
-    FilesystemReferenceProfileRepository,
-)
+from lyrics_aligner.adapters.reference_profiles import FilesystemReferenceProfileRepository
 
 
 def _write_profile_fixture(
@@ -64,7 +62,9 @@ def test_loads_reference_profile_from_directory(tmp_path: Path) -> None:
     assert len(profile.frames) == 2
     assert profile.frames[0].observed_at == pytest.approx(0.0)
     assert profile.frames[1].frame_duration_seconds == pytest.approx(0.25)
-    assert profile.metadata == {"song": "Example Song", "section": "Verse 1"}
+    assert profile.metadata["song"] == "Example Song"
+    assert profile.metadata["section"] == "Verse 1"
+    assert profile.metadata["profile_path"] == str(profile_path.resolve())
     assert len(profile.slide_cues) == 1
     assert profile.slide_cues[0].slide_number == 1
     assert profile.slide_cues[0].section == "Verse 1"

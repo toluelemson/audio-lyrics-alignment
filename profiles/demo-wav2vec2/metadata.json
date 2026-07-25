@@ -1,0 +1,9 @@
+{
+  "audio_path": "/Users/toluelemosho/Desktop/ResearchPapers/audio-lyrics-alignment-sprint-1/demo_assets/onnx_demo_song.wav",
+  "block_size": "4096",
+  "feature_extractor": "OnnxFeatureExtractor",
+  "profile_version": "1",
+  "sample_rate": "16000",
+  "slides_path": "/Users/toluelemosho/Desktop/ResearchPapers/audio-lyrics-alignment-sprint-1/demo_assets/onnx_demo_slides.json",
+  "source_sample_rate": "16000"
+}

@@ -12,6 +12,7 @@ class TimelineSlideResolverConfig:
     lookahead_seconds: float = 0.2
     cooldown_seconds: float = 0.5
     consecutive_match_count: int = 2
+    max_emit_lag_seconds: float = 2.0
 
     def __post_init__(self) -> None:
         if self.lookahead_seconds < 0:
@@ -20,6 +21,8 @@ class TimelineSlideResolverConfig:
             raise ValueError("cooldown_seconds must be non-negative")
         if self.consecutive_match_count <= 0:
             raise ValueError("consecutive_match_count must be greater than zero")
+        if self.max_emit_lag_seconds < 0:
+            raise ValueError("max_emit_lag_seconds must be non-negative")
 
 
 class TimelineSlideResolver:
@@ -42,6 +45,11 @@ class TimelineSlideResolver:
 
     def resolve(self, match: MatchResult) -> SlideCommand | None:
         if not match.valid or self._next_index >= len(self._slide_cues):
+            self._reset_candidate()
+            return None
+
+        self._skip_stale_cues(match.reference_timestamp)
+        if self._next_index >= len(self._slide_cues):
             self._reset_candidate()
             return None
 
@@ -82,6 +90,37 @@ class TimelineSlideResolver:
             reference_timestamp=cue.reference_timestamp,
             confidence=match.confidence,
         )
+
+    def seek_to_slide(self, slide_number: int) -> None:
+        target_index = None
+        for index, cue in enumerate(self._slide_cues):
+            if cue.slide_number == slide_number:
+                target_index = index
+                break
+        if target_index is None:
+            raise ValueError(f"Unknown slide number: {slide_number}")
+
+        next_index = target_index
+        while next_index < len(self._slide_cues):
+            if self._slide_cues[next_index].slide_number > slide_number:
+                break
+            next_index += 1
+
+        cue = self._slide_cues[target_index]
+        self._next_index = next_index
+        self._last_emitted_slide_number = cue.slide_number
+        self._last_emitted_reference_timestamp = cue.reference_timestamp
+        self._reset_candidate()
+
+    def _skip_stale_cues(self, reference_timestamp: float) -> None:
+        while self._next_index < len(self._slide_cues):
+            cue = self._slide_cues[self._next_index]
+            if reference_timestamp - cue.reference_timestamp <= self._config.max_emit_lag_seconds:
+                return
+            self._next_index += 1
+            self._last_emitted_slide_number = cue.slide_number
+            self._last_emitted_reference_timestamp = cue.reference_timestamp
+        self._reset_candidate()
 
     def _reset_candidate(self) -> None:
         self._candidate_count = 0

@@ -14,7 +14,27 @@ if str(SRC) not in sys.path:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build an offline reference profile from WAV.")
     parser.add_argument("--audio", required=True, help="Path to the reference WAV file.")
-    parser.add_argument("--slides", required=True, help="Path to the slide cue JSON file.")
+    parser.add_argument(
+        "--audio-role",
+        choices=("mixed", "vocals", "instrumental", "other"),
+        default="mixed",
+        help="Label the reference audio so downstream workflows know whether it is vocals-only.",
+    )
+    parser.add_argument(
+        "--companion-audio",
+        help=(
+            "Optional related audio file, for example the original mix when "
+            "--audio is vocals-only."
+        ),
+    )
+    parser.add_argument(
+        "--slides",
+        required=True,
+        help=(
+            "Path to the slide cue JSON file captured from user slide-change clicks. "
+            "Each entry should include slide text plus click_timestamp."
+        ),
+    )
     parser.add_argument(
         "--output",
         required=True,
@@ -81,6 +101,8 @@ def main() -> None:
         audio_path=args.audio,
         slides_path=args.slides,
         profile_name=profile_name,
+        audio_role=args.audio_role,
+        companion_audio_path=args.companion_audio,
     )
     builder.save(profile, args.output)
 
@@ -91,6 +113,7 @@ def main() -> None:
         "feature_size": int(profile.feature_matrix.shape[1]),
         "slides": len(profile.slides),
         "profile_version": profile.metadata["profile_version"],
+        "reference_audio_role": profile.metadata["reference_audio_role"],
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
 

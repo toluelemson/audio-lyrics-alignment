@@ -109,3 +109,57 @@ def test_resolver_suppresses_new_slide_during_cooldown() -> None:
     assert blocked is None
     assert released is not None
     assert released.slide_number == 2
+
+
+def test_resolver_skips_stale_cues_after_late_relock() -> None:
+    profile = ReferenceProfile(
+        name="song-a",
+        frames=(),
+        metadata={},
+        slide_cues=(
+            SlideCue(1, "Verse 1", "Amazing grace", 1.0),
+            SlideCue(2, "Verse 2", "How sweet the sound", 5.0),
+            SlideCue(3, "Verse 3", "That saved a wretch", 9.0),
+        ),
+    )
+    resolver = TimelineSlideResolver(
+        profile,
+        TimelineSlideResolverConfig(
+            lookahead_seconds=0.0,
+            cooldown_seconds=0.0,
+            consecutive_match_count=1,
+            max_emit_lag_seconds=1.0,
+        ),
+    )
+
+    result = resolver.resolve(MatchResult(10, 9.2, 0.1, 0.1, 0.9, True))
+
+    assert result is not None
+    assert result.slide_number == 3
+
+
+def test_resolver_seek_to_slide_advances_future_emissions() -> None:
+    profile = ReferenceProfile(
+        name="song-a",
+        frames=(),
+        metadata={},
+        slide_cues=(
+            SlideCue(1, "Verse 1", "Amazing grace", 1.0),
+            SlideCue(2, "Verse 2", "How sweet the sound", 5.0),
+            SlideCue(3, "Verse 3", "That saved a wretch", 9.0),
+        ),
+    )
+    resolver = TimelineSlideResolver(
+        profile,
+        TimelineSlideResolverConfig(
+            lookahead_seconds=0.0,
+            cooldown_seconds=0.0,
+            consecutive_match_count=1,
+        ),
+    )
+
+    resolver.seek_to_slide(2)
+    result = resolver.resolve(MatchResult(10, 9.2, 0.1, 0.1, 0.9, True))
+
+    assert result is not None
+    assert result.slide_number == 3

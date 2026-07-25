@@ -1,4 +1,4 @@
-"""Application orchestration and lifecycle services."""
+"""Application orchestration and runtime services."""
 
 from lyrics_aligner.application.runtime import (
     AudioIngestionRuntime,
@@ -6,8 +6,4 @@ from lyrics_aligner.application.runtime import (
     RuntimeReport,
 )
 
-__all__ = [
-    "AudioIngestionRuntime",
-    "BoundedAudioQueue",
-    "RuntimeReport",
-]
+__all__ = ["AudioIngestionRuntime", "BoundedAudioQueue", "RuntimeReport"]

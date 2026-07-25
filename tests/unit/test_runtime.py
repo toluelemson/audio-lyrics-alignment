@@ -10,7 +10,11 @@ from lyrics_aligner.adapters.matching import (
     StabilizedFeatureMatcher,
     StabilizedFeatureMatcherConfig,
 )
-from lyrics_aligner.application.runtime import AudioIngestionRuntime, BoundedAudioQueue
+from lyrics_aligner.application.runtime import (
+    AudioIngestionRuntime,
+    BoundedAudioQueue,
+    ManualOverrideController,
+)
 from lyrics_aligner.domain.models import (
     FeatureFrame,
     MatchResult,
@@ -69,6 +73,7 @@ def test_runtime_consumes_simulated_audio_and_returns_metrics(
     assert report.metrics.queue_high_water_mark >= 1
     assert report.queue_size == 0
     assert report.command_queue_size == 0
+    assert report.manual_override_active is False
     assert report.last_match is None
     assert report.peak == pytest.approx(0.25, rel=0.05)
     assert report.rms > 0
@@ -261,6 +266,22 @@ class RepeatingFeatureExtractor:
         ]
 
 
+class ResettableSequenceMatcher:
+    def __init__(self, results: list[MatchResult]) -> None:
+        self._results = results
+        self._index = 0
+        self.reset_calls = 0
+
+    def match(self, frame: FeatureFrame) -> MatchResult:
+        del frame
+        result = self._results[self._index]
+        self._index += 1
+        return result
+
+    def reset(self) -> None:
+        self.reset_calls += 1
+
+
 class SequenceMatcher:
     def __init__(self, results: list[MatchResult]) -> None:
         self._results = results
@@ -345,6 +366,23 @@ class RecordingPresentationGateway:
         self.commands.append(command)
 
 
+class MultiCommandSlideResolver:
+    def __init__(self) -> None:
+        self._slide_number = 0
+
+    def resolve(self, match: MatchResult) -> SlideCommand | None:
+        if not match.valid:
+            return None
+        self._slide_number += 1
+        return SlideCommand(
+            slide_number=self._slide_number,
+            section=f"Section {self._slide_number}",
+            lyrics="Amazing grace",
+            reference_timestamp=match.reference_timestamp,
+            confidence=match.confidence,
+        )
+
+
 def test_runtime_sends_slide_command_when_resolver_returns_one() -> None:
     extractor: FeatureExtractor = RepeatingFeatureExtractor()
     matcher: FeatureMatcher = SequenceMatcher(
@@ -414,3 +452,129 @@ def test_runtime_counts_gateway_failures_for_slide_command() -> None:
     assert report.metrics.osc_send_failures == 1
     assert report.command_queue_size == 0
     assert report.last_slide_command is not None
+
+
+def test_runtime_skips_matching_and_resets_tracker_during_sustained_silence() -> None:
+    extractor: FeatureExtractor = RepeatingFeatureExtractor()
+    matcher = ResettableSequenceMatcher([MatchResult(1, 0.25, 0.1, 0.1, 0.95, True)])
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.03,
+                frequency=100,
+                amplitude=0.0,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-silence-reset"),
+        feature_extractor=extractor,
+        feature_matcher=matcher,
+        diagnostics_interval_seconds=1.0,
+        silence_threshold_rms=0.01,
+        silence_reset_chunk_count=2,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.silent_chunks == 3
+    assert report.metrics.feature_frames_processed == 0
+    assert report.metrics.accepted_matches == 0
+    assert matcher.reset_calls >= 1
+    assert report.last_match is None
+
+
+def test_runtime_suppresses_slide_command_during_manual_override() -> None:
+    extractor: FeatureExtractor = RepeatingFeatureExtractor()
+    matcher: FeatureMatcher = SequenceMatcher(
+        [MatchResult(1, 0.25, 0.1, 0.1, 0.95, True)]
+    )
+    slide_resolver: SlideResolver = SingleCommandSlideResolver()
+    gateway = RecordingPresentationGateway()
+    controller = ManualOverrideController(active=True)
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.01,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-manual-override"),
+        feature_extractor=extractor,
+        feature_matcher=matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+        manual_override_controller=controller,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.slide_triggers_sent == 0
+    assert report.metrics.manual_override_suppressed_triggers == 1
+    assert report.manual_override_active is True
+    assert gateway.commands == []
+
+
+class ToggleAfterFirstExtractFeatureExtractor:
+    def __init__(self, controller: ManualOverrideController) -> None:
+        self._controller = controller
+        self._calls = 0
+
+    def extract(self, chunk: object) -> list[FeatureFrame]:
+        del chunk
+        self._calls += 1
+        if self._calls == 2:
+            self._controller.deactivate()
+        return [
+            FeatureFrame(
+                values=np.array([0.1, 0.2], dtype=np.float32),
+                observed_at=1.0,
+                frame_duration_seconds=0.01,
+            )
+        ]
+
+
+def test_runtime_resumes_slide_delivery_after_manual_override_is_disabled() -> None:
+    controller = ManualOverrideController(active=True)
+    extractor: FeatureExtractor = ToggleAfterFirstExtractFeatureExtractor(controller)
+    matcher: FeatureMatcher = SequenceMatcher(
+        [
+            MatchResult(1, 0.25, 0.1, 0.1, 0.95, True),
+            MatchResult(2, 0.50, 0.1, 0.1, 0.95, True),
+        ]
+    )
+    slide_resolver: SlideResolver = MultiCommandSlideResolver()
+    gateway = RecordingPresentationGateway()
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.02,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-manual-override-resume"),
+        feature_extractor=extractor,
+        feature_matcher=matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+        manual_override_controller=controller,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.slide_triggers_sent == 1
+    assert report.metrics.manual_override_suppressed_triggers == 1
+    assert report.manual_override_active is False
+    assert len(gateway.commands) == 1
+    assert gateway.commands[0].slide_number == 2

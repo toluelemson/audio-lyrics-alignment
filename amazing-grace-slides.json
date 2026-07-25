@@ -1,0 +1,44 @@
+[
+  {
+    "slide_number": 1,
+    "section": "Verse 1",
+    "lyrics": "Amazing Grace\nHow sweet the sound,\nThat saved a wretch like me!\nI once was lost,\nBut now am found;\nWas blind, but now I see.",
+    "reference_timestamp": 0.0
+  },
+  {
+    "slide_number": 2,
+    "section": "Verse 2",
+    "lyrics": "'Twas grace that taught\nMy heart to fear,\nAnd grace my fears relieved;\nHow precious\nDid that grace appear\nThe hour I first believed!",
+    "reference_timestamp": 32.5
+  },
+  {
+    "slide_number": 3,
+    "section": "Verse 3",
+    "lyrics": "Through many dangers,\nToils and snares,\nI have already come;\n'Tis grace hath brought\nMe safe thus far,\nAnd grace will lead me home.",
+    "reference_timestamp": 55.5
+  },
+  {
+    "slide_number": 4,
+    "section": "Verse 4",
+    "lyrics": "The Lord has promised\nGood to me,\nHis Word my hope secures;\nHe will my Shield\nAnd Portion be,\nAs long as life endures.",
+    "reference_timestamp": 92.0
+  },
+  {
+    "slide_number": 5,
+    "section": "Verse 5",
+    "lyrics": "Yea, when this flesh\nAnd heart shall fail,\nAnd mortal life shall cease,\nI shall possess,\nWithin the veil,\nA life of joy and peace.",
+    "reference_timestamp": 111.0
+  },
+  {
+    "slide_number": 6,
+    "section": "Verse 6",
+    "lyrics": "The earth shall soon\nDissolve like snow,\nThe sun forbear to shine;\nBut God, Who called me\nHere below,\nWill be forever mine.",
+    "reference_timestamp": 166.0
+  },
+  {
+    "slide_number": 7,
+    "section": "Verse 7",
+    "lyrics": "When we've been there\nTen thousand years,\nBright shining as the sun,\nWe've no less days\nTo sing God's praise\nThan when we'd first begun.",
+    "reference_timestamp": 195.5
+  }
+]
