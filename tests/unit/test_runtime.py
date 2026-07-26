@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Iterator
 
 import numpy as np
 import pytest
@@ -18,13 +19,23 @@ from lyrics_aligner.application.runtime import (
 from lyrics_aligner.domain.models import (
     FeatureFrame,
     MatchResult,
+    OperatorCorrectionRecord,
     ReferenceProfile,
     SlideCommand,
+    AudioChunk,
 )
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 from lyrics_aligner.ports.feature_matcher import FeatureMatcher
 from lyrics_aligner.ports.presentation_gateway import PresentationGateway
 from lyrics_aligner.ports.slide_resolver import SlideResolver
+
+
+class SequenceAudioSource:
+    def __init__(self, chunks: list[AudioChunk]) -> None:
+        self._chunks = chunks
+
+    def chunks(self) -> Iterator[AudioChunk]:
+        yield from self._chunks
 
 
 def test_bounded_audio_queue_drops_oldest_when_full() -> None:
@@ -294,6 +305,15 @@ class SequenceMatcher:
         return result
 
 
+class ForceAnchorSequenceMatcher(SequenceMatcher):
+    def __init__(self, results: list[MatchResult]) -> None:
+        super().__init__(results)
+        self.forced_timestamps: list[float] = []
+
+    def force_anchor(self, reference_timestamp: float) -> None:
+        self.forced_timestamps.append(reference_timestamp)
+
+
 def test_runtime_uses_stabilizer_to_filter_large_forward_jump() -> None:
     extractor: FeatureExtractor = RepeatingFeatureExtractor()
     raw_matcher: FeatureMatcher = SequenceMatcher(
@@ -355,6 +375,24 @@ class SingleCommandSlideResolver:
         )
 
 
+class ThresholdSlideResolver:
+    def __init__(self, threshold: float) -> None:
+        self._threshold = threshold
+        self._emitted = False
+
+    def resolve(self, match: MatchResult) -> SlideCommand | None:
+        if self._emitted or not match.valid or match.reference_timestamp < self._threshold:
+            return None
+        self._emitted = True
+        return SlideCommand(
+            slide_number=2,
+            section="Verse 2",
+            lyrics="Held through silence",
+            reference_timestamp=match.reference_timestamp,
+            confidence=match.confidence,
+        )
+
+
 class RecordingPresentationGateway:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
@@ -381,6 +419,60 @@ class MultiCommandSlideResolver:
             reference_timestamp=match.reference_timestamp,
             confidence=match.confidence,
         )
+
+
+class OperatorJumpSlideResolver:
+    def __init__(self) -> None:
+        self.seek_calls: list[int] = []
+
+    def resolve(self, match: MatchResult) -> SlideCommand | None:
+        del match
+        return None
+
+    def seek_to_slide(self, slide_number: int) -> None:
+        self.seek_calls.append(slide_number)
+
+    def slide_command_for_slide(
+        self,
+        slide_number: int,
+        *,
+        confidence: float = 1.0,
+    ) -> SlideCommand:
+        return SlideCommand(
+            slide_number=slide_number,
+            section=f"Section {slide_number}",
+            lyrics=f"Slide {slide_number}",
+            reference_timestamp=float(slide_number) * 10.0,
+            confidence=confidence,
+        )
+
+
+class RecordingCorrectionSink:
+    def __init__(self) -> None:
+        self.records: list[OperatorCorrectionRecord] = []
+
+    def build_record(
+        self,
+        *,
+        profile_name: str,
+        detected_reference_timestamp: float | None,
+        chosen_reference_timestamp: float,
+        chosen_slide_number: int,
+        chosen_section: str,
+        chosen_lyrics: str,
+    ) -> OperatorCorrectionRecord:
+        return OperatorCorrectionRecord(
+            profile_name=profile_name,
+            detected_reference_timestamp=detected_reference_timestamp,
+            chosen_reference_timestamp=chosen_reference_timestamp,
+            chosen_slide_number=chosen_slide_number,
+            chosen_section=chosen_section,
+            chosen_lyrics=chosen_lyrics,
+            created_at="2026-07-25T00:00:00+00:00",
+        )
+
+    def record(self, record: OperatorCorrectionRecord) -> None:
+        self.records.append(record)
 
 
 def test_runtime_sends_slide_command_when_resolver_returns_one() -> None:
@@ -485,6 +577,50 @@ def test_runtime_skips_matching_and_resets_tracker_during_sustained_silence() ->
     assert report.last_match is None
 
 
+def test_runtime_brief_silence_holds_timeline_and_can_continue_slide_progression() -> None:
+    matcher: FeatureMatcher = SequenceMatcher(
+        [MatchResult(1, 0.25, 0.1, 0.1, 0.95, True)]
+    )
+    slide_resolver: SlideResolver = ThresholdSlideResolver(0.5)
+    gateway = RecordingPresentationGateway()
+    runtime = AudioIngestionRuntime(
+        source=SequenceAudioSource(
+            [
+                AudioChunk(
+                    samples=np.ones(250, dtype=np.float32) * 0.25,
+                    captured_at=0.0,
+                    sequence_number=0,
+                ),
+                AudioChunk(
+                    samples=np.zeros(250, dtype=np.float32),
+                    captured_at=0.25,
+                    sequence_number=1,
+                ),
+            ]
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-silence-hold"),
+        feature_extractor=RepeatingFeatureExtractor(),
+        feature_matcher=matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+        silence_threshold_rms=0.01,
+        silence_reset_chunk_count=3,
+        audio_sample_rate_hz=1_000,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.silent_chunks == 1
+    assert report.metrics.accepted_matches == 1
+    assert report.last_match is not None
+    assert report.last_match.reference_timestamp == 0.5
+    assert report.metrics.slide_triggers_sent == 1
+    assert len(gateway.commands) == 1
+    assert gateway.commands[0].slide_number == 2
+
+
 def test_runtime_suppresses_slide_command_during_manual_override() -> None:
     extractor: FeatureExtractor = RepeatingFeatureExtractor()
     matcher: FeatureMatcher = SequenceMatcher(
@@ -578,3 +714,44 @@ def test_runtime_resumes_slide_delivery_after_manual_override_is_disabled() -> N
     assert report.manual_override_active is False
     assert len(gateway.commands) == 1
     assert gateway.commands[0].slide_number == 2
+
+
+def test_runtime_jump_to_slide_activates_manual_override_and_reanchors() -> None:
+    matcher = ForceAnchorSequenceMatcher([])
+    slide_resolver = OperatorJumpSlideResolver()
+    gateway = RecordingPresentationGateway()
+    correction_sink = RecordingCorrectionSink()
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.01,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-jump-to-slide"),
+        feature_matcher=matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+        operator_correction_sink=correction_sink,
+        profile_name="song-a",
+    )
+    runtime._last_match = MatchResult(1, 12.5, 0.1, 0.1, 0.95, True)  # noqa: SLF001
+
+    command = runtime.jump_to_slide(3)
+
+    assert command.slide_number == 3
+    assert runtime._manual_override_controller.is_active is True
+    assert slide_resolver.seek_calls == [3]
+    assert matcher.forced_timestamps == [30.0]
+    assert len(gateway.commands) == 1
+    assert gateway.commands[0].slide_number == 3
+    assert len(correction_sink.records) == 1
+    assert correction_sink.records[0].profile_name == "song-a"
+    assert correction_sink.records[0].detected_reference_timestamp == 12.5
+    assert correction_sink.records[0].chosen_reference_timestamp == 30.0
+    assert correction_sink.records[0].chosen_slide_number == 3

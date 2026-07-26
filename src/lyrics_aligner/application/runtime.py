@@ -10,7 +10,13 @@ from typing import Protocol
 import numpy as np
 
 from lyrics_aligner.application.metrics import RuntimeMetrics
-from lyrics_aligner.domain.models import AudioChunk, FeatureFrame, MatchResult, SlideCommand
+from lyrics_aligner.domain.models import (
+    AudioChunk,
+    FeatureFrame,
+    MatchResult,
+    OperatorCorrectionRecord,
+    SlideCommand,
+)
 from lyrics_aligner.ports.audio_source import AudioSource
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
 from lyrics_aligner.ports.feature_matcher import FeatureMatcher
@@ -200,6 +206,10 @@ class RuntimeStatusObserver(Protocol):
     def update(self, snapshot: RuntimeStatusSnapshot) -> None: ...
 
 
+class OperatorCorrectionSink(Protocol):
+    def record(self, record: OperatorCorrectionRecord) -> None: ...
+
+
 class AudioIngestionRuntime:
     """Run audio capture and queue consumption with periodic diagnostics."""
 
@@ -220,6 +230,9 @@ class AudioIngestionRuntime:
         command_queue_capacity: int = 8,
         manual_override_controller: ManualOverrideController | None = None,
         status_observer: RuntimeStatusObserver | None = None,
+        operator_correction_sink: OperatorCorrectionSink | None = None,
+        profile_name: str = "unknown-profile",
+        audio_sample_rate_hz: int = 16_000,
         emit_diagnostic_logs: bool = True,
         emit_match_debug_logs: bool = False,
     ) -> None:
@@ -240,6 +253,9 @@ class AudioIngestionRuntime:
             manual_override_controller or ManualOverrideController()
         )
         self._status_observer = status_observer
+        self._operator_correction_sink = operator_correction_sink
+        self._profile_name = profile_name
+        self._audio_sample_rate_hz = audio_sample_rate_hz
         self._emit_diagnostic_logs = emit_diagnostic_logs
         self._emit_match_debug_logs = emit_match_debug_logs
         self._metrics = RuntimeMetrics()
@@ -326,6 +342,21 @@ class AudioIngestionRuntime:
             self._metrics.slide_triggers_sent += 1
         self._publish_status()
 
+    def enable_manual_override(self) -> bool:
+        changed = self._manual_override_controller.activate()
+        self._publish_status()
+        return changed
+
+    def disable_manual_override(self) -> bool:
+        changed = self._manual_override_controller.deactivate()
+        self._publish_status()
+        return changed
+
+    def toggle_manual_override(self) -> bool:
+        active = self._manual_override_controller.toggle()
+        self._publish_status()
+        return active
+
     def force_match_anchor(self, reference_timestamp: float) -> bool:
         force_anchor = getattr(self._feature_matcher, "force_anchor", None)
         if not callable(force_anchor):
@@ -333,6 +364,28 @@ class AudioIngestionRuntime:
         force_anchor(reference_timestamp)
         self._publish_status()
         return True
+
+    def jump_to_slide(
+        self,
+        slide_number: int,
+        *,
+        activate_manual_override: bool = True,
+    ) -> SlideCommand:
+        build_command = getattr(self._slide_resolver, "slide_command_for_slide", None)
+        if not callable(build_command):
+            raise ValueError("slide resolver does not support operator slide jumps")
+        seek_to_slide = getattr(self._slide_resolver, "seek_to_slide", None)
+        if not callable(seek_to_slide):
+            raise ValueError("slide resolver does not support operator seeking")
+
+        command = build_command(slide_number, confidence=1.0)
+        if activate_manual_override:
+            self._manual_override_controller.activate()
+        seek_to_slide(slide_number)
+        self.force_match_anchor(command.reference_timestamp)
+        self._record_operator_correction(command)
+        self.emit_operator_slide_command(command)
+        return command
 
     def _produce(self) -> None:
         try:
@@ -363,6 +416,9 @@ class AudioIngestionRuntime:
                 self._metrics.clipped_chunks += 1
         if is_silent:
             self._consecutive_silent_chunks += 1
+            if self._consecutive_silent_chunks < self._silence_reset_chunk_count:
+                self._hold_timeline_during_silence(chunk)
+                return
             if self._consecutive_silent_chunks >= self._silence_reset_chunk_count:
                 self._reset_matching_due_to_silence()
             return
@@ -370,6 +426,32 @@ class AudioIngestionRuntime:
         self._consecutive_silent_chunks = 0
         if self._feature_extractor is not None:
             self._record_feature_frames(self._feature_extractor.extract(chunk))
+
+    def _record_operator_correction(self, command: SlideCommand) -> None:
+        if self._operator_correction_sink is None:
+            return
+        record = OperatorCorrectionRecord(
+            profile_name=self._profile_name,
+            detected_reference_timestamp=(
+                None if self._last_match is None else self._last_match.reference_timestamp
+            ),
+            chosen_reference_timestamp=command.reference_timestamp,
+            chosen_slide_number=command.slide_number,
+            chosen_section=command.section,
+            chosen_lyrics=command.lyrics,
+            created_at="",
+        )
+        build_record = getattr(self._operator_correction_sink, "build_record", None)
+        if callable(build_record):
+            record = build_record(
+                profile_name=record.profile_name,
+                detected_reference_timestamp=record.detected_reference_timestamp,
+                chosen_reference_timestamp=record.chosen_reference_timestamp,
+                chosen_slide_number=record.chosen_slide_number,
+                chosen_section=record.chosen_section,
+                chosen_lyrics=record.chosen_lyrics,
+            )
+        self._operator_correction_sink.record(record)
 
     def _publish_status(self) -> None:
         snapshot = self._build_status_snapshot()
@@ -437,17 +519,45 @@ class AudioIngestionRuntime:
             self._metrics.invalid_inference_outputs += invalid_frames
 
     def _record_match(self, result: MatchResult) -> None:
+        self._apply_match_result(result, count_metrics=True)
+
+    def _apply_match_result(
+        self,
+        result: MatchResult,
+        *,
+        count_metrics: bool,
+    ) -> None:
         self._log_match_debug()
         self._last_match = result
-        with self._metrics_lock:
-            if result.valid:
-                self._metrics.accepted_matches += 1
-            else:
-                self._metrics.low_confidence_matches += 1
+        if count_metrics:
+            with self._metrics_lock:
+                if result.valid:
+                    self._metrics.accepted_matches += 1
+                else:
+                    self._metrics.low_confidence_matches += 1
         if self._slide_resolver is not None:
             command = self._slide_resolver.resolve(result)
             if command is not None:
                 self._emit_slide_command(command)
+
+    def _hold_timeline_during_silence(self, chunk: AudioChunk) -> None:
+        if self._last_match is None or not self._last_match.valid:
+            return
+        chunk_duration_seconds = float(chunk.samples.size) if chunk.samples.size else 0.0
+        if chunk_duration_seconds <= 0.0:
+            return
+        held_result = MatchResult(
+            reference_frame=self._last_match.reference_frame,
+            reference_timestamp=(
+                self._last_match.reference_timestamp
+                + chunk_duration_seconds / float(self._audio_sample_rate_hz)
+            ),
+            raw_distance=self._last_match.raw_distance,
+            normalized_distance=self._last_match.normalized_distance,
+            confidence=self._last_match.confidence,
+            valid=True,
+        )
+        self._apply_match_result(held_result, count_metrics=False)
 
     def _log_match_debug(self) -> None:
         if not self._emit_match_debug_logs or self._feature_matcher is None:

@@ -53,3 +53,25 @@ class SlideCue:
     section: str
     lyrics: str
     reference_timestamp: float
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorCorrectionRecord:
+    profile_name: str
+    detected_reference_timestamp: float | None
+    chosen_reference_timestamp: float
+    chosen_slide_number: int
+    chosen_section: str
+    chosen_lyrics: str
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class CorrectionAnchor:
+    profile_name: str
+    source_reference_timestamp: float
+    target_reference_timestamp: float
+    slide_number: int
+    section: str
+    lyrics: str
+    correction_count: int

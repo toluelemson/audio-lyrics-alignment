@@ -1,3 +1,5 @@
+import pytest
+
 from lyrics_aligner.adapters.slides import (
     TimelineSlideResolver,
     TimelineSlideResolverConfig,
@@ -163,3 +165,36 @@ def test_resolver_seek_to_slide_advances_future_emissions() -> None:
 
     assert result is not None
     assert result.slide_number == 3
+
+
+def test_resolver_groups_consecutive_line_cues_into_single_slide_output() -> None:
+    profile = ReferenceProfile(
+        name="song-a",
+        frames=(),
+        metadata={},
+        slide_cues=(
+            SlideCue(1, "Verse 1", "Amazing grace", 0.5),
+            SlideCue(1, "Verse 1", "How sweet the sound", 0.8),
+            SlideCue(2, "Verse 2", "That saved a wretch", 1.2),
+        ),
+    )
+    resolver = TimelineSlideResolver(
+        profile,
+        TimelineSlideResolverConfig(
+            lookahead_seconds=0.0,
+            cooldown_seconds=0.0,
+            consecutive_match_count=1,
+        ),
+    )
+
+    first = resolver.resolve(MatchResult(1, 0.5, 0.1, 0.1, 0.9, True))
+    second = resolver.resolve(MatchResult(2, 0.81, 0.1, 0.1, 0.9, True))
+    third = resolver.resolve(MatchResult(3, 1.21, 0.1, 0.1, 0.9, True))
+
+    assert first is not None
+    assert first.slide_number == 1
+    assert first.reference_timestamp == pytest.approx(0.5)
+    assert first.lyrics == "Amazing grace\nHow sweet the sound"
+    assert second is None
+    assert third is not None
+    assert third.slide_number == 2

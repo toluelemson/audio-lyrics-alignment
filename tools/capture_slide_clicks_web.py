@@ -651,6 +651,33 @@ def _session_payload(session, output_path: Path, audio_path: Path | None) -> dic
     }
 
 
+def _parse_range_header(value: str, size: int) -> tuple[int, int] | None:
+    if not value.startswith("bytes="):
+        return None
+    range_spec = value.removeprefix("bytes=").strip()
+    if "," in range_spec or "-" not in range_spec:
+        return None
+    start_text, end_text = range_spec.split("-", 1)
+    if not start_text and not end_text:
+        return None
+    if not start_text:
+        suffix_length = int(end_text)
+        if suffix_length <= 0:
+            return None
+        if suffix_length >= size:
+            return (0, size - 1)
+        return (size - suffix_length, size - 1)
+    start = int(start_text)
+    if start < 0 or start >= size:
+        return None
+    if not end_text:
+        return (start, size - 1)
+    end = int(end_text)
+    if end < start:
+        return None
+    return (start, min(end, size - 1))
+
+
 def main() -> None:
     from lyrics_aligner.application.click_capture import (
         ClickCaptureSession,
@@ -780,16 +807,40 @@ def main() -> None:
             self.wfile.write(data)
 
         def _write_file(self, path: Path) -> None:
-            data = path.read_bytes()
             content_type, _ = mimetypes.guess_type(path.name)
-            self.send_response(HTTPStatus.OK)
+            file_size = path.stat().st_size
+            range_header = self.headers.get("Range")
+            byte_range = None
+            if range_header is not None:
+                try:
+                    byte_range = _parse_range_header(range_header, file_size)
+                except ValueError:
+                    byte_range = None
+            if byte_range is None:
+                start = 0
+                end = file_size - 1
+                status = HTTPStatus.OK
+            else:
+                start, end = byte_range
+                status = HTTPStatus.PARTIAL_CONTENT
+            content_length = end - start + 1
+
+            self.send_response(status)
             self.send_header(
                 "Content-Type",
                 content_type or "application/octet-stream",
             )
-            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Length", str(content_length))
+            if status == HTTPStatus.PARTIAL_CONTENT:
+                self.send_header(
+                    "Content-Range",
+                    f"bytes {start}-{end}/{file_size}",
+                )
             self.end_headers()
-            self.wfile.write(data)
+            with path.open("rb") as handle:
+                handle.seek(start)
+                self.wfile.write(handle.read(content_length))
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(

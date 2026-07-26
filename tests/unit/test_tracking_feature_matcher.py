@@ -471,3 +471,44 @@ def test_tracker_enters_uncertain_after_exceeding_tracking_miss_patience() -> No
     assert tracker.last_decision is not None
     assert tracker.last_decision.reason == "tracking_rejected_large_jump"
     assert tracker.state_name == "UNCERTAIN"
+
+
+def test_tracker_can_globally_reacquire_from_uncertain_state() -> None:
+    matcher: FeatureMatcher = SequenceMatcher(
+        [
+            _result(1),
+            _result(2),
+            _result(40),
+            _result(41),
+            _result(42),
+        ]
+    )
+    tracker = TrackingFeatureMatcher(
+        matcher,
+        TrackingFeatureMatcherConfig(
+            search_min_consecutive_matches=2,
+            recovery_min_consecutive_matches=2,
+            search_min_duration_seconds=0.0,
+            recovery_min_duration_seconds=0.0,
+            tracking_miss_patience=0,
+            lost_match_patience=3,
+            max_forward_jump_seconds=0.5,
+        ),
+    )
+
+    assert tracker.match(_frame(0.0)).valid is False
+    assert tracker.match(_frame(0.1)).valid is True
+
+    uncertain = tracker.match(_frame(0.2))
+    assert uncertain.valid is False
+    assert tracker.state_name == "UNCERTAIN"
+
+    first_reacquire = tracker.match(_frame(10.25))
+    second_reacquire = tracker.match(_frame(10.5))
+
+    assert first_reacquire.valid is False
+    assert second_reacquire.valid is True
+    assert second_reacquire.reference_frame == 42
+    assert tracker.last_decision is not None
+    assert tracker.last_decision.reason == "recovery_reacquired_global_lock"
+    assert tracker.state_name == "TRACKING"

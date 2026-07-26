@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from typing import TYPE_CHECKING
 
 from lyrics_aligner.adapters.audio import (
     MicrophoneAudioConfig,
@@ -14,8 +15,8 @@ from lyrics_aligner.adapters.features import (
     OnnxFeatureExtractorConfig,
 )
 from lyrics_aligner.adapters.matching import (
-    NearestNeighborFeatureMatcher,
-    NearestNeighborFeatureMatcherConfig,
+    RollingWindowFeatureMatcher,
+    RollingWindowFeatureMatcherConfig,
     TrackingFeatureMatcher,
     TrackingFeatureMatcherConfig,
 )
@@ -32,13 +33,20 @@ from lyrics_aligner.adapters.slides import (
     TimelineSlideResolverConfig,
 )
 from lyrics_aligner.application import AudioIngestionRuntime
-from lyrics_aligner.application.runtime import RuntimeReport
+from lyrics_aligner.application.operator_corrections import ProfileCorrectionStore
+from lyrics_aligner.application.runtime import (
+    ManualOverrideController,
+    RuntimeReport,
+)
 from lyrics_aligner.config import AppConfig
 from lyrics_aligner.domain.models import ReferenceProfile
 from lyrics_aligner.ports.audio_source import AudioSource
 from lyrics_aligner.ports.feature_matcher import FeatureMatcher
 from lyrics_aligner.ports.presentation_gateway import PresentationGateway
 from lyrics_aligner.ports.slide_resolver import SlideResolver
+
+if TYPE_CHECKING:
+    from lyrics_aligner.application.runtime import RuntimeStatusObserver
 
 
 def _build_audio_source(config: AppConfig) -> AudioSource:
@@ -67,14 +75,18 @@ def _build_audio_source(config: AppConfig) -> AudioSource:
 def _build_feature_matcher(
     config: AppConfig,
     profile: ReferenceProfile,
+    *,
+    correction_store: ProfileCorrectionStore | None = None,
 ) -> FeatureMatcher:
-    matcher = NearestNeighborFeatureMatcher(
+    correction_anchors = () if correction_store is None else correction_store.load_anchors()
+    matcher = RollingWindowFeatureMatcher(
         profile,
-        NearestNeighborFeatureMatcherConfig(
+        RollingWindowFeatureMatcherConfig(
             confidence_threshold=config.match_confidence_threshold,
             ambiguity_distance_margin=config.match_ambiguity_distance_margin,
             ambiguity_min_separation_seconds=config.match_ambiguity_min_separation_seconds,
         ),
+        correction_anchors=correction_anchors,
     )
     return TrackingFeatureMatcher(
         matcher,
@@ -186,6 +198,60 @@ def _log_runtime_health(
         report.command_queue_size,
         report.command_queue_capacity,
         config.presentation_mode.upper(),
+    )
+
+
+def build_runtime(
+    config: AppConfig,
+    logger: logging.Logger,
+    *,
+    manual_override_controller: ManualOverrideController | None = None,
+    status_observer: RuntimeStatusObserver | None = None,
+) -> AudioIngestionRuntime:
+    profile = FilesystemReferenceProfileRepository().load(config.reference_profile_path)
+    logger.info(
+        "Loaded reference profile name=%s frames=%s path=%s",
+        profile.name,
+        len(profile.frames),
+        config.reference_profile_path,
+    )
+
+    source = _build_audio_source(config)
+    correction_store = ProfileCorrectionStore(config.reference_profile_path)
+    feature_extractor = OnnxFeatureExtractor(
+        OnnxFeatureExtractorConfig(
+            model_path=config.feature_model_path,
+            sample_rate=config.sample_rate,
+        )
+    )
+    feature_matcher = _build_feature_matcher(
+        config,
+        profile,
+        correction_store=correction_store,
+    )
+    slide_resolver = _build_slide_resolver(config, profile)
+    presentation_gateway = _build_presentation_gateway(config, logger, profile)
+
+    return AudioIngestionRuntime(
+        source=source,
+        queue_capacity=config.audio_queue_capacity,
+        logger=logger,
+        feature_extractor=feature_extractor,
+        feature_matcher=feature_matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=presentation_gateway,
+        diagnostics_interval_seconds=config.diagnostics_interval_seconds,
+        device_name=getattr(source, "device_name", source.__class__.__name__),
+        silence_threshold_rms=config.silence_threshold_rms,
+        silence_reset_chunk_count=config.silence_reset_chunk_count,
+        clipping_threshold_peak=config.clipping_threshold_peak,
+        command_queue_capacity=config.presentation_command_queue_capacity,
+        manual_override_controller=manual_override_controller,
+        status_observer=status_observer,
+        operator_correction_sink=correction_store,
+        profile_name=profile.name,
+        audio_sample_rate_hz=config.sample_rate,
+        emit_match_debug_logs=config.match_debug_logging,
     )
 
 
@@ -491,42 +557,7 @@ def main() -> None:
     config = _config_from_args(_parse_args())
     _validate_config(config)
     logger = logging.getLogger(__name__)
-
-    profile = FilesystemReferenceProfileRepository().load(config.reference_profile_path)
-    logger.info(
-        "Loaded reference profile name=%s frames=%s path=%s",
-        profile.name,
-        len(profile.frames),
-        config.reference_profile_path,
-    )
-
-    source = _build_audio_source(config)
-    feature_extractor = OnnxFeatureExtractor(
-        OnnxFeatureExtractorConfig(
-            model_path=config.feature_model_path,
-            sample_rate=config.sample_rate,
-        )
-    )
-    feature_matcher = _build_feature_matcher(config, profile)
-    slide_resolver = _build_slide_resolver(config, profile)
-    presentation_gateway = _build_presentation_gateway(config, logger, profile)
-
-    runtime = AudioIngestionRuntime(
-        source=source,
-        queue_capacity=config.audio_queue_capacity,
-        logger=logger,
-        feature_extractor=feature_extractor,
-        feature_matcher=feature_matcher,
-        slide_resolver=slide_resolver,
-        presentation_gateway=presentation_gateway,
-        diagnostics_interval_seconds=config.diagnostics_interval_seconds,
-        device_name=getattr(source, "device_name", source.__class__.__name__),
-        silence_threshold_rms=config.silence_threshold_rms,
-        silence_reset_chunk_count=config.silence_reset_chunk_count,
-        clipping_threshold_peak=config.clipping_threshold_peak,
-        command_queue_capacity=config.presentation_command_queue_capacity,
-        emit_match_debug_logs=config.match_debug_logging,
-    )
+    runtime = build_runtime(config, logger)
     report = runtime.run()
     _log_runtime_health(logger, config, report)
     logger.info(

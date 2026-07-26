@@ -107,6 +107,10 @@ class TrackingFeatureMatcher:
         self._recovery_anchor_observed_at: float | None = None
         self._recovery_start_observed_at: float | None = None
         self._recovery_streak = 0
+        self._global_reacquire_anchor_timestamp: float | None = None
+        self._global_reacquire_anchor_observed_at: float | None = None
+        self._global_reacquire_start_observed_at: float | None = None
+        self._global_reacquire_streak = 0
         self._lost_count = 0
         self._anchored_timeline_active = False
         self._last_decision: TrackingDecision | None = None
@@ -126,6 +130,7 @@ class TrackingFeatureMatcher:
         self._timeline_origin_observed_at = None
         self._reset_search()
         self._reset_recovery()
+        self._reset_global_reacquire()
         self._lost_count = 0
         self._tracking_miss_count = 0
         self._anchored_timeline_active = False
@@ -148,6 +153,7 @@ class TrackingFeatureMatcher:
         self._anchored_timeline_active = True
         self._reset_search()
         self._reset_recovery()
+        self._reset_global_reacquire()
         self._recovery_anchor_timestamp = reference_timestamp
         self._recovery_anchor_observed_at = current_observed_at
         self._recovery_start_observed_at = current_observed_at
@@ -248,6 +254,7 @@ class TrackingFeatureMatcher:
         self._update_timeline_origin(frame.observed_at, candidate.reference_timestamp)
         self._reset_search()
         self._reset_recovery()
+        self._reset_global_reacquire()
         self._lost_count = 0
         self._state = "TRACKING"
         self._record_decision(
@@ -309,6 +316,7 @@ class TrackingFeatureMatcher:
         self._lost_count = 0
         self._tracking_miss_count = 0
         self._reset_recovery()
+        self._reset_global_reacquire()
         self._record_decision(
             previous_state,
             candidate,
@@ -325,6 +333,9 @@ class TrackingFeatureMatcher:
         previous_state: str,
     ) -> MatchResult:
         self._ensure_timeline_origin(frame.observed_at)
+        global_reacquired = self._try_global_reacquire(frame, candidate, previous_state)
+        if global_reacquired is not None:
+            return global_reacquired
         if not self._is_recovery_candidate_acceptable(frame.observed_at, candidate):
             anchored_result = self._anchored_timeline_result(frame, candidate)
             if anchored_result is not None:
@@ -335,6 +346,7 @@ class TrackingFeatureMatcher:
                 self._lost_count = 0
                 self._reset_recovery()
                 self._reset_search()
+                self._reset_global_reacquire()
                 self._state = "TRACKING"
                 self._record_decision(
                     previous_state,
@@ -350,6 +362,7 @@ class TrackingFeatureMatcher:
                 self._state = "SEARCHING"
                 self._lost_count = 0
                 self._reset_search()
+                self._reset_global_reacquire()
                 result = self._invalidate(candidate)
                 self._record_decision(
                     previous_state,
@@ -407,6 +420,7 @@ class TrackingFeatureMatcher:
         self._update_timeline_origin(frame.observed_at, candidate.reference_timestamp)
         self._reset_recovery()
         self._reset_search()
+        self._reset_global_reacquire()
         self._state = "TRACKING"
         self._record_decision(
             previous_state,
@@ -423,6 +437,7 @@ class TrackingFeatureMatcher:
         self._tracking_miss_count = 0
         self._reset_recovery()
         self._reset_search()
+        self._reset_global_reacquire()
 
     def _is_tracking_candidate_acceptable(
         self,
@@ -579,6 +594,66 @@ class TrackingFeatureMatcher:
         self._recovery_start_observed_at = None
         self._recovery_streak = 0
 
+    def _reset_global_reacquire(self) -> None:
+        self._global_reacquire_anchor_timestamp = None
+        self._global_reacquire_anchor_observed_at = None
+        self._global_reacquire_start_observed_at = None
+        self._global_reacquire_streak = 0
+
+    def _try_global_reacquire(
+        self,
+        frame: FeatureFrame,
+        candidate: MatchResult,
+        previous_state: str,
+    ) -> MatchResult | None:
+        if not candidate.valid or candidate.confidence < self._config.recovery_confidence_threshold:
+            self._reset_global_reacquire()
+            return None
+        if self._is_recovery_candidate_acceptable(frame.observed_at, candidate):
+            self._reset_global_reacquire()
+            return None
+
+        if self._is_consistent_with_anchor(
+            candidate.reference_timestamp,
+            self._global_reacquire_anchor_timestamp,
+            frame.observed_at,
+            self._global_reacquire_anchor_observed_at,
+        ):
+            self._global_reacquire_streak += 1
+        else:
+            self._global_reacquire_streak = 1
+            self._global_reacquire_start_observed_at = frame.observed_at
+        if self._global_reacquire_start_observed_at is None:
+            self._global_reacquire_start_observed_at = frame.observed_at
+        self._global_reacquire_anchor_timestamp = candidate.reference_timestamp
+        self._global_reacquire_anchor_observed_at = frame.observed_at
+
+        reacquire_duration = frame.observed_at - self._global_reacquire_start_observed_at
+        if (
+            self._global_reacquire_streak < self._config.search_min_consecutive_matches
+            or reacquire_duration < self._config.search_min_duration_seconds
+        ):
+            return None
+
+        previous_accepted_frame = self._last_accepted_frame
+        self._last_accepted_frame = candidate.reference_frame
+        self._last_accepted_timestamp = candidate.reference_timestamp
+        self._update_timeline_origin(frame.observed_at, candidate.reference_timestamp)
+        self._tracking_miss_count = 0
+        self._lost_count = 0
+        self._reset_recovery()
+        self._reset_search()
+        self._reset_global_reacquire()
+        self._state = "TRACKING"
+        self._record_decision(
+            previous_state,
+            candidate,
+            accepted=True,
+            reason="recovery_reacquired_global_lock",
+            previous_accepted_frame=previous_accepted_frame,
+        )
+        return candidate
+
     def _record_decision(
         self,
         previous_state: str,
@@ -631,6 +706,10 @@ class TrackingFeatureMatcher:
             self._state in ("UNINITIALIZED", "SEARCHING")
             or self._timeline_origin_observed_at is None
         ):
+            if callable(clear_window):
+                clear_window()
+            return
+        if self._state == "UNCERTAIN":
             if callable(clear_window):
                 clear_window()
             return
