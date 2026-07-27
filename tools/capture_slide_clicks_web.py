@@ -120,11 +120,11 @@ HTML = """<!doctype html>
       box-shadow: 0 0 0 3px rgba(165, 75, 42, 0.1);
     }
     .stage-panel.clickable,
-    .list li.clickable {
+    .list-entry.clickable {
       cursor: pointer;
     }
     .stage-panel.clickable:hover,
-    .list li.clickable:hover {
+    .list-entry.clickable:hover {
       transform: translateY(-1px);
       box-shadow: 0 10px 22px rgba(75, 53, 29, 0.12);
     }
@@ -189,19 +189,34 @@ HTML = """<!doctype html>
       overflow: auto;
     }
     .list li {
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .list-entry {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
       border: 1px solid var(--line);
       border-radius: 14px;
       padding: 12px 14px;
       background: rgba(255,255,255,0.65);
+      text-align: left;
+      color: inherit;
+      display: block;
     }
-    .list li.done {
+    .list-entry.done {
       border-color: color-mix(in srgb, var(--ok) 40%, var(--line));
       background: color-mix(in srgb, #eef9f1 70%, white);
     }
-    .list li.current {
+    .list-entry.current {
       border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
       background: linear-gradient(135deg, #fff2e8 0%, #fffaf4 100%);
       box-shadow: 0 0 0 3px rgba(165, 75, 42, 0.12);
+    }
+    .list-entry:focus-visible {
+      outline: 3px solid rgba(165, 75, 42, 0.22);
+      outline-offset: 2px;
     }
     .list-top {
       display: flex;
@@ -230,9 +245,8 @@ HTML = """<!doctype html>
   <div class="shell">
     <div class="hero">
       <div class="eyebrow">Reference Prep</div>
-      <h1>Capture Line Change Clicks</h1>
-      <p class="sub">Start the song, click <strong>Start Capture</strong>, then press
-      <strong>Mark Current Line</strong>, click the current line itself, or hit the space bar each time the lyrics should change.</p>
+      <h1>Author Line Timings</h1>
+      <p class="sub">Press <strong>Start</strong>. While the song plays, hit <strong>space</strong> or click the big current line when the lyrics should change. If a line is off later, play the song and click that line to re-time it. Pause to make small earlier or later adjustments.</p>
     </div>
     <div class="grid">
       <section class="card">
@@ -260,17 +274,20 @@ HTML = """<!doctype html>
           </div>
         </div>
         <div class="controls">
-          <button class="primary" id="startButton">Start Capture</button>
-          <button class="primary" id="markButton" disabled>Mark Current Line</button>
-          <button class="secondary" id="undoButton" disabled>Undo Last Click</button>
+          <button class="primary" id="startButton">Start</button>
+          <button class="secondary" id="undoButton" disabled>Undo</button>
           <button class="secondary" id="resetButton">Reset</button>
-          <button class="success" id="finishButton" disabled>Finish Capture</button>
+          <button class="success" id="saveButton" disabled>Save Timings</button>
         </div>
-        <div class="caption">Keyboard: <strong>space</strong> marks the current line. <strong>Backspace</strong> undoes the last click.</div>
+        <div class="controls" style="margin-top:12px">
+          <button class="secondary" id="nudgeBack50" disabled>Earlier</button>
+          <button class="secondary" id="nudgeForward50" disabled>Later</button>
+        </div>
+        <div class="caption">Keyboard: <strong>space</strong> marks the current line. <strong>Backspace</strong> undoes the last click. Pause audio, click a timed line, then use <strong>Earlier</strong> or <strong>Later</strong> if needed.</div>
         <div class="banner" id="banner"></div>
       </section>
       <aside class="card">
-        <h2 style="margin-top:0">Captured Lines</h2>
+        <h2 style="margin-top:0">Line Timeline</h2>
         <ol class="list" id="capturedList"></ol>
       </aside>
     </div>
@@ -280,6 +297,7 @@ HTML = """<!doctype html>
     const state = {
       session: bootstrapSession,
       timerHandle: null,
+      selectedCueIndex: null,
     };
 
     const audio = document.getElementById("audio");
@@ -296,10 +314,11 @@ HTML = """<!doctype html>
     const banner = document.getElementById("banner");
     const capturedList = document.getElementById("capturedList");
     const startButton = document.getElementById("startButton");
-    const markButton = document.getElementById("markButton");
     const undoButton = document.getElementById("undoButton");
     const resetButton = document.getElementById("resetButton");
-    const finishButton = document.getElementById("finishButton");
+    const saveButton = document.getElementById("saveButton");
+    const nudgeBack50 = document.getElementById("nudgeBack50");
+    const nudgeForward50 = document.getElementById("nudgeForward50");
     if (bootstrapSession.audio_available) {
       audio.src = "/audio";
       audio.style.display = "block";
@@ -361,26 +380,40 @@ HTML = """<!doctype html>
       updateTimer();
     }
 
+    async function anchorCueAtPlayback(cueIndex) {
+      state.session = await api("/api/anchor", {
+        method: "POST",
+        body: JSON.stringify({
+          cue_index: cueIndex,
+          elapsed: currentCaptureTimestamp(),
+        }),
+      });
+      state.selectedCueIndex = cueIndex;
+      render();
+      updateTimer();
+    }
+
     function render() {
       if (!state.session) {
         return;
       }
-      const captured = state.session.captured_cues;
-      const total = state.session.script_cues.length;
+      const cues = state.session.cue_states;
+      const captured = cues.filter((cue) => cue.click_timestamp !== null);
+      const total = cues.length;
       const next = state.session.next_cue;
       const replayIndex = replaySlideIndex();
-      const replayEnabled = replayIndex !== null && (state.session.finished || captured.length === total);
-      const captureIndex = captured.length;
+      const replayEnabled = replayIndex !== null && state.session.finished;
+      const captureIndex = state.session.current_index;
       const activeIndex = replayEnabled ? replayIndex : captureIndex;
       const previous = replayEnabled
         ? (activeIndex > 0 ? captured[activeIndex - 1] : null)
         : (captured.length > 0 ? captured[captured.length - 1] : null);
       const currentCue = replayEnabled
-        ? (activeIndex >= 0 ? state.session.script_cues[activeIndex] : null)
+        ? (activeIndex >= 0 ? cues[activeIndex] : null)
         : next;
       const upcoming = replayEnabled
-        ? state.session.script_cues[activeIndex + 1] || null
-        : (next ? state.session.script_cues[captured.length + 1] || null : null);
+        ? cues[activeIndex + 1] || null
+        : (next ? cues[captured.length + 1] || null : null);
       progressPill.textContent = `${captured.length} / ${total} captured`;
       nextPill.textContent = replayEnabled
         ? (upcoming ? `Next: ${upcoming.section} · Line ${upcoming.line_number}` : "Next: complete")
@@ -401,37 +434,88 @@ HTML = """<!doctype html>
       upcomingLyrics.textContent = upcoming
         ? upcoming.lyrics
         : "Capture will advance here automatically.";
-      markButton.disabled = !state.session.started || state.session.complete || state.session.finished;
+      const canCaptureCurrent = state.session.started && !state.session.complete && !state.session.finished;
       undoButton.disabled = captured.length === 0;
-      finishButton.disabled = captured.length !== total || state.session.finished;
-      currentPanel.classList.toggle("clickable", !markButton.disabled);
+      saveButton.disabled = captured.length === 0;
+      currentPanel.classList.toggle("clickable", canCaptureCurrent);
+      const selectedCue = (
+        state.selectedCueIndex === null
+        ? null
+        : cues[state.selectedCueIndex] || null
+      );
+      const canNudge = Boolean(
+        selectedCue
+        && selectedCue.click_timestamp !== null
+        && audio.style.display !== "none"
+        && audio.paused
+      );
+      [nudgeBack50, nudgeForward50].forEach((button) => {
+        button.disabled = !canNudge;
+      });
 
       capturedList.innerHTML = "";
       let activeItem = null;
-      state.session.script_cues.forEach((cue, index) => {
+      cues.forEach((cue, index) => {
         const item = document.createElement("li");
-        if (index < captured.length) item.classList.add("done");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "list-entry";
+        if (cue.click_timestamp !== null) button.classList.add("done");
         const isCurrentItem = replayEnabled ? index === activeIndex : index === captureIndex && index < total;
         if (isCurrentItem) {
-          item.classList.add("current");
+          button.classList.add("current");
           activeItem = item;
         }
-        if (!replayEnabled && isCurrentItem && !markButton.disabled) {
-          item.classList.add("clickable");
-          item.addEventListener("click", () => {
-            captureCurrentLine().catch((error) => setBanner(error.message, "error"));
-          });
+        if (state.selectedCueIndex === index) {
+          button.classList.add("current");
         }
-        const stamp = index < captured.length
-          ? formatSeconds(captured[index].click_timestamp)
+        if (cue.locked) {
+          button.style.borderColor = "color-mix(in srgb, var(--accent) 55%, var(--line))";
+        } else if (cue.drafted) {
+          button.style.borderColor = "color-mix(in srgb, var(--ok) 35%, var(--line))";
+        }
+        if (!replayEnabled && cue.click_timestamp === null && canCaptureCurrent) {
+          button.classList.add("clickable");
+          button.addEventListener("click", () => {
+            anchorCueAtPlayback(index)
+              .then(() => {
+                setBanner("Anchor set.");
+              })
+              .catch((error) => setBanner(error.message, "error"));
+          });
+        } else if (cue.click_timestamp !== null) {
+          button.classList.add("clickable");
+          button.addEventListener("click", () => {
+            const shouldReanchorFromPlayback = (
+              audio.style.display !== "none"
+              && !audio.paused
+            );
+            if (shouldReanchorFromPlayback) {
+              anchorCueAtPlayback(index)
+                .then(() => {
+                  setBanner("Line re-anchored to current playback time.");
+                })
+                .catch((error) => setBanner(error.message, "error"));
+              return;
+            }
+            state.selectedCueIndex = index;
+            setBanner("Line selected for nudging.");
+            render();
+          });
+        } else {
+          button.disabled = true;
+        }
+        const stamp = cue.click_timestamp !== null
+          ? formatSeconds(cue.click_timestamp)
           : "pending";
-        item.innerHTML = `
+        button.innerHTML = `
           <div class="list-top">
             <strong>${cue.section} · Line ${cue.line_number} of ${cue.line_count}</strong>
             <span class="stamp">${stamp}</span>
           </div>
           <div>${cue.lyrics}</div>
         `;
+        item.appendChild(button);
         capturedList.appendChild(item);
       });
       if (activeItem) {
@@ -481,6 +565,7 @@ HTML = """<!doctype html>
     startButton.addEventListener("click", async () => {
       try {
         state.session = await api("/api/start", { method: "POST", body: "{}" });
+        state.selectedCueIndex = null;
         setBanner("Capture started.");
         syncTimerLoop();
         render();
@@ -489,16 +574,8 @@ HTML = """<!doctype html>
       }
     });
 
-    markButton.addEventListener("click", async () => {
-      try {
-        await captureCurrentLine();
-      } catch (error) {
-        setBanner(error.message, "error");
-      }
-    });
-
     currentPanel.addEventListener("click", async () => {
-      if (markButton.disabled) return;
+      if (!state.session || !state.session.started || state.session.complete) return;
       try {
         await captureCurrentLine();
       } catch (error) {
@@ -519,6 +596,7 @@ HTML = """<!doctype html>
     resetButton.addEventListener("click", async () => {
       try {
         state.session = await api("/api/reset", { method: "POST", body: "{}" });
+        state.selectedCueIndex = null;
         setBanner("Capture reset.");
         render();
         updateTimer();
@@ -527,16 +605,39 @@ HTML = """<!doctype html>
       }
     });
 
-    finishButton.addEventListener("click", async () => {
+    saveButton.addEventListener("click", async () => {
       try {
-        state.session = await api("/api/finish", { method: "POST", body: "{}" });
-        setBanner(`Capture finished and saved to ${state.session.saved_output_path}`);
+        state.session = await api("/api/save", { method: "POST", body: "{}" });
+        setBanner(`Capture stopped and timings saved to ${state.session.saved_output_path}`);
         render();
         updateTimer();
       } catch (error) {
         setBanner(error.message, "error");
       }
     });
+
+    async function nudgeSelected(deltaSeconds) {
+      if (state.selectedCueIndex === null) {
+        setBanner("Select a timed line to nudge.", "error");
+        return;
+      }
+      try {
+        state.session = await api("/api/nudge", {
+          method: "POST",
+          body: JSON.stringify({
+            cue_index: state.selectedCueIndex,
+            delta_seconds: deltaSeconds,
+          }),
+        });
+        setBanner("Line nudged.");
+        render();
+      } catch (error) {
+        setBanner(error.message, "error");
+      }
+    }
+
+    nudgeBack50.addEventListener("click", () => nudgeSelected(-0.05));
+    nudgeForward50.addEventListener("click", () => nudgeSelected(0.05));
 
     ["timeupdate", "play", "pause", "seeked", "loadedmetadata"].forEach((eventName) => {
       audio.addEventListener(eventName, () => {
@@ -556,8 +657,8 @@ HTML = """<!doctype html>
       if (event.code !== "Space") return;
       if (event.target && ["INPUT", "TEXTAREA"].includes(event.target.tagName)) return;
       event.preventDefault();
-      if (markButton.disabled) return;
-      markButton.click();
+      if (!state.session || !state.session.started || state.session.complete) return;
+      currentPanel.click();
     });
 
     render();
@@ -610,16 +711,7 @@ def _session_payload(session, output_path: Path, audio_path: Path | None) -> dic
         else None
     )
     return {
-        "script_cues": [
-            {
-                "slide_number": cue.slide_number,
-                "section": cue.section,
-                "lyrics": cue.lyrics,
-                "line_number": cue.line_number,
-                "line_count": cue.line_count,
-            }
-            for cue in session.script_cues
-        ],
+        "cue_states": list(session.cue_states()),
         "captured_cues": [
             {
                 "slide_number": cue.slide_number,
@@ -644,10 +736,12 @@ def _session_payload(session, output_path: Path, audio_path: Path | None) -> dic
         ),
         "started": session.started_at is not None,
         "complete": session.is_complete(),
+        "current_index": session.current_index(),
         "finished": session.finished,
         "started_at_epoch_seconds": session.started_at_wall_seconds,
         "saved_output_path": str(output_path),
         "audio_available": audio_path is not None,
+        "locked_count": len(session.locked_indices),
     }
 
 
@@ -681,15 +775,19 @@ def _parse_range_header(value: str, size: int) -> tuple[int, int] | None:
 def main() -> None:
     from lyrics_aligner.application.click_capture import (
         ClickCaptureSession,
+        detect_onset_candidates,
         load_slide_script,
         write_captured_slide_cues,
     )
 
     args = _parse_args()
     script_cues = load_slide_script(args.slides)
-    session = ClickCaptureSession(script_cues)
     output_path = Path(args.output).expanduser().resolve()
     audio_path = None if args.audio is None else Path(args.audio).expanduser().resolve()
+    onset_candidates = ()
+    if audio_path is not None and audio_path.exists():
+        onset_candidates = detect_onset_candidates(str(audio_path))
+    session = ClickCaptureSession(script_cues, onset_candidates=onset_candidates)
 
     class Handler(BaseHTTPRequestHandler):
         def _read_json_body(self) -> dict[str, object]:
@@ -747,6 +845,45 @@ def main() -> None:
                         HTTPStatus.OK,
                     )
                     return
+                if parsed.path == "/api/anchor":
+                    payload = self._read_json_body()
+                    cue_index = payload.get("cue_index")
+                    elapsed = payload.get("elapsed")
+                    if isinstance(cue_index, bool) or not isinstance(cue_index, int):
+                        raise ValueError("cue_index must be an integer")
+                    if elapsed is not None and not isinstance(elapsed, (int, float)):
+                        raise ValueError("elapsed must be a number")
+                    session.set_anchor(
+                        cue_index,
+                        elapsed=None if elapsed is None else float(elapsed),
+                    )
+                    self._write_json(
+                        _session_payload(session, output_path, audio_path),
+                        HTTPStatus.OK,
+                    )
+                    return
+                if parsed.path == "/api/draft":
+                    self._read_json_body()
+                    session.draft_gaps()
+                    self._write_json(
+                        _session_payload(session, output_path, audio_path),
+                        HTTPStatus.OK,
+                    )
+                    return
+                if parsed.path == "/api/nudge":
+                    payload = self._read_json_body()
+                    cue_index = payload.get("cue_index")
+                    delta_seconds = payload.get("delta_seconds")
+                    if isinstance(cue_index, bool) or not isinstance(cue_index, int):
+                        raise ValueError("cue_index must be an integer")
+                    if not isinstance(delta_seconds, (int, float)):
+                        raise ValueError("delta_seconds must be a number")
+                    session.nudge_cue(cue_index, float(delta_seconds))
+                    self._write_json(
+                        _session_payload(session, output_path, audio_path),
+                        HTTPStatus.OK,
+                    )
+                    return
                 if parsed.path == "/api/undo":
                     self._read_json_body()
                     session.undo_last()
@@ -765,6 +902,7 @@ def main() -> None:
                     return
                 if parsed.path == "/api/save":
                     self._read_json_body()
+                    session.stop()
                     write_captured_slide_cues(str(output_path), session.captured_cues())
                     self._write_json(
                         _session_payload(session, output_path, audio_path),

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from threading import Condition, Event, Lock, Thread
 from time import monotonic
 from typing import Protocol
+from uuid import uuid4
 
 import numpy as np
 
@@ -178,6 +179,9 @@ class RuntimeReport:
     recovery_active: bool = False
     suggested_section_key: str | None = None
     suggested_section_label: str | None = None
+    no_vocal_detected: bool = False
+    alignment_hold_active: bool = False
+    alignment_hold_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +204,9 @@ class RuntimeStatusSnapshot:
     recovery_active: bool = False
     suggested_section_key: str | None = None
     suggested_section_label: str | None = None
+    no_vocal_detected: bool = False
+    alignment_hold_active: bool = False
+    alignment_hold_reason: str | None = None
 
 
 class RuntimeStatusObserver(Protocol):
@@ -232,7 +239,10 @@ class AudioIngestionRuntime:
         status_observer: RuntimeStatusObserver | None = None,
         operator_correction_sink: OperatorCorrectionSink | None = None,
         profile_name: str = "unknown-profile",
+        operator_slide_targets: tuple[SlideCommand, ...] = (),
         audio_sample_rate_hz: int = 16_000,
+        vocal_presence_detection_enabled: bool = False,
+        voiced_pitch_threshold: float = 0.02,
         emit_diagnostic_logs: bool = True,
         emit_match_debug_logs: bool = False,
     ) -> None:
@@ -255,7 +265,11 @@ class AudioIngestionRuntime:
         self._status_observer = status_observer
         self._operator_correction_sink = operator_correction_sink
         self._profile_name = profile_name
+        self._operator_slide_targets = operator_slide_targets
         self._audio_sample_rate_hz = audio_sample_rate_hz
+        self._session_id = uuid4().hex
+        self._vocal_presence_detection_enabled = vocal_presence_detection_enabled
+        self._voiced_pitch_threshold = voiced_pitch_threshold
         self._emit_diagnostic_logs = emit_diagnostic_logs
         self._emit_match_debug_logs = emit_match_debug_logs
         self._metrics = RuntimeMetrics()
@@ -264,8 +278,11 @@ class AudioIngestionRuntime:
         self._last_rms = 0.0
         self._last_peak = 0.0
         self._consecutive_silent_chunks = 0
+        self._consecutive_non_voiced_chunks = 0
         self._last_match: MatchResult | None = None
         self._last_slide_command: SlideCommand | None = None
+        self._alignment_hold_active = False
+        self._alignment_hold_reason: str | None = None
 
     def run(self) -> RuntimeReport:
         producer = Thread(target=self._produce, name="audio-producer", daemon=True)
@@ -309,6 +326,9 @@ class AudioIngestionRuntime:
             recovery_active=snapshot.recovery_active,
             suggested_section_key=snapshot.suggested_section_key,
             suggested_section_label=snapshot.suggested_section_label,
+            no_vocal_detected=snapshot.no_vocal_detected,
+            alignment_hold_active=snapshot.alignment_hold_active,
+            alignment_hold_reason=snapshot.alignment_hold_reason,
         )
 
     def stop(self) -> None:
@@ -383,9 +403,14 @@ class AudioIngestionRuntime:
             self._manual_override_controller.activate()
         seek_to_slide(slide_number)
         self.force_match_anchor(command.reference_timestamp)
+        self._alignment_hold_active = False
+        self._alignment_hold_reason = None
         self._record_operator_correction(command)
         self.emit_operator_slide_command(command)
         return command
+
+    def operator_slide_targets(self) -> tuple[SlideCommand, ...]:
+        return self._operator_slide_targets
 
     def _produce(self) -> None:
         try:
@@ -425,7 +450,19 @@ class AudioIngestionRuntime:
 
         self._consecutive_silent_chunks = 0
         if self._feature_extractor is not None:
-            self._record_feature_frames(self._feature_extractor.extract(chunk))
+            frames = self._feature_extractor.extract(chunk)
+            if self._vocal_presence_detection_enabled and not self._frames_include_voiced_pitch(frames):
+                self._consecutive_non_voiced_chunks += 1
+                with self._metrics_lock:
+                    self._metrics.non_voiced_chunks += 1
+                self._record_feature_frames(frames, allow_matching=False)
+                if self._consecutive_non_voiced_chunks < self._silence_reset_chunk_count:
+                    self._hold_timeline_during_silence(chunk)
+                else:
+                    self._reset_matching_due_to_silence()
+                return
+            self._consecutive_non_voiced_chunks = 0
+            self._record_feature_frames(frames, allow_matching=True)
 
     def _record_operator_correction(self, command: SlideCommand) -> None:
         if self._operator_correction_sink is None:
@@ -435,21 +472,27 @@ class AudioIngestionRuntime:
             detected_reference_timestamp=(
                 None if self._last_match is None else self._last_match.reference_timestamp
             ),
+            detected_confidence=None if self._last_match is None else self._last_match.confidence,
             chosen_reference_timestamp=command.reference_timestamp,
             chosen_slide_number=command.slide_number,
             chosen_section=command.section,
             chosen_lyrics=command.lyrics,
             created_at="",
+            no_vocal_detected=self._build_status_snapshot().no_vocal_detected,
+            session_id=self._session_id,
         )
         build_record = getattr(self._operator_correction_sink, "build_record", None)
         if callable(build_record):
             record = build_record(
                 profile_name=record.profile_name,
                 detected_reference_timestamp=record.detected_reference_timestamp,
+                detected_confidence=record.detected_confidence,
                 chosen_reference_timestamp=record.chosen_reference_timestamp,
                 chosen_slide_number=record.chosen_slide_number,
                 chosen_section=record.chosen_section,
                 chosen_lyrics=record.chosen_lyrics,
+                no_vocal_detected=record.no_vocal_detected,
+                session_id=record.session_id,
             )
         self._operator_correction_sink.record(record)
 
@@ -466,10 +509,11 @@ class AudioIngestionRuntime:
             "command_queue=%s/%s "
             "chunks_received=%s chunks_dropped=%s "
             "silent_chunks=%s clipped_chunks=%s feature_frames_processed=%s "
+            "non_voiced_chunks=%s "
             "accepted_matches=%s low_confidence_matches=%s slide_triggers_sent=%s "
             "manual_override_suppressed=%s "
             "osc_send_failures=%s tracking_state=%s last_reference_timestamp=%s "
-            "last_slide_number=%s last_confidence=%.2f manual_override=%s",
+            "last_slide_number=%s last_confidence=%.2f manual_override=%s no_vocal=%s",
             snapshot.device_name,
             snapshot.rms,
             snapshot.peak,
@@ -482,6 +526,7 @@ class AudioIngestionRuntime:
             snapshot.metrics.silent_chunks,
             snapshot.metrics.clipped_chunks,
             snapshot.metrics.feature_frames_processed,
+            snapshot.metrics.non_voiced_chunks,
             snapshot.metrics.accepted_matches,
             snapshot.metrics.low_confidence_matches,
             snapshot.metrics.slide_triggers_sent,
@@ -500,9 +545,15 @@ class AudioIngestionRuntime:
             ),
             snapshot.last_match.confidence if snapshot.last_match is not None else 0.0,
             "active" if snapshot.manual_override_active else "auto",
+            "yes" if snapshot.no_vocal_detected else "no",
         )
 
-    def _record_feature_frames(self, frames: list[FeatureFrame]) -> None:
+    def _record_feature_frames(
+        self,
+        frames: list[FeatureFrame],
+        *,
+        allow_matching: bool,
+    ) -> None:
         valid_frames = 0
         invalid_frames = 0
         for frame in frames:
@@ -511,7 +562,7 @@ class AudioIngestionRuntime:
                 invalid_frames += 1
                 continue
             valid_frames += 1
-            if self._feature_matcher is not None:
+            if allow_matching and self._feature_matcher is not None:
                 self._record_match(self._feature_matcher.match(frame))
 
         with self._metrics_lock:
@@ -529,6 +580,8 @@ class AudioIngestionRuntime:
     ) -> None:
         self._log_match_debug()
         self._last_match = result
+        self._alignment_hold_active = not result.valid
+        self._alignment_hold_reason = "low_confidence" if not result.valid else None
         if count_metrics:
             with self._metrics_lock:
                 if result.valid:
@@ -558,6 +611,15 @@ class AudioIngestionRuntime:
             valid=True,
         )
         self._apply_match_result(held_result, count_metrics=False)
+
+    def _frames_include_voiced_pitch(self, frames: list[FeatureFrame]) -> bool:
+        for frame in frames:
+            values = np.asarray(frame.values, dtype=np.float32)
+            if values.size == 0 or not np.isfinite(values).all():
+                continue
+            if abs(float(values[-1])) > self._voiced_pitch_threshold:
+                return True
+        return False
 
     def _log_match_debug(self) -> None:
         if not self._emit_match_debug_logs or self._feature_matcher is None:
@@ -600,6 +662,8 @@ class AudioIngestionRuntime:
         if callable(reset_method):
             reset_method()
         self._last_match = None
+        self._alignment_hold_active = True
+        self._alignment_hold_reason = "silence"
 
     def _emit_slide_command(self, command: SlideCommand) -> None:
         self._last_slide_command = command
@@ -665,6 +729,7 @@ class AudioIngestionRuntime:
                 chunks_received=self._metrics.chunks_received,
                 chunks_dropped=self._metrics.chunks_dropped,
                 silent_chunks=self._metrics.silent_chunks,
+                non_voiced_chunks=self._metrics.non_voiced_chunks,
                 clipped_chunks=self._metrics.clipped_chunks,
                 feature_frames_processed=self._metrics.feature_frames_processed,
                 invalid_inference_outputs=self._metrics.invalid_inference_outputs,
@@ -707,4 +772,10 @@ class AudioIngestionRuntime:
             suggested_section_label=getattr(
                 controller_status, "suggested_section_label", None
             ),
+            no_vocal_detected=(
+                self._vocal_presence_detection_enabled
+                and self._consecutive_non_voiced_chunks > 0
+            ),
+            alignment_hold_active=self._alignment_hold_active,
+            alignment_hold_reason=self._alignment_hold_reason,
         )

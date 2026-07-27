@@ -81,6 +81,7 @@ def _build_feature_extractor(args: argparse.Namespace) -> object:
         OnnxFeatureExtractorConfig(
             model_path=args.feature_model_path,
             sample_rate=16_000,
+            append_pitch_feature=True,
         )
     )
 

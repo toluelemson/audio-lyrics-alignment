@@ -222,6 +222,7 @@ def build_runtime(
         OnnxFeatureExtractorConfig(
             model_path=config.feature_model_path,
             sample_rate=config.sample_rate,
+            append_pitch_feature=profile.metadata.get("pitch_contour_enabled") == "1",
         )
     )
     feature_matcher = _build_feature_matcher(
@@ -231,6 +232,11 @@ def build_runtime(
     )
     slide_resolver = _build_slide_resolver(config, profile)
     presentation_gateway = _build_presentation_gateway(config, logger, profile)
+    operator_slide_targets = ()
+    if slide_resolver is not None:
+        slide_commands = getattr(slide_resolver, "slide_commands", None)
+        if callable(slide_commands):
+            operator_slide_targets = slide_commands()
 
     return AudioIngestionRuntime(
         source=source,
@@ -250,7 +256,9 @@ def build_runtime(
         status_observer=status_observer,
         operator_correction_sink=correction_store,
         profile_name=profile.name,
+        operator_slide_targets=operator_slide_targets,
         audio_sample_rate_hz=config.sample_rate,
+        vocal_presence_detection_enabled=profile.metadata.get("pitch_contour_enabled") == "1",
         emit_match_debug_logs=config.match_debug_logging,
     )
 

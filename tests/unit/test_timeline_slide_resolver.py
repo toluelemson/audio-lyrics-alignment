@@ -167,6 +167,26 @@ def test_resolver_seek_to_slide_advances_future_emissions() -> None:
     assert result.slide_number == 3
 
 
+def test_resolver_exposes_slide_commands_for_operator_jump_targets() -> None:
+    profile = ReferenceProfile(
+        name="song",
+        frames=(),
+        metadata={},
+        slide_cues=(
+            SlideCue(1, "Verse 1", "Amazing grace", 1.0),
+            SlideCue(1, "Verse 1", "How sweet the sound", 1.3),
+            SlideCue(2, "Verse 2", "That saved a wretch", 5.0),
+        ),
+    )
+    resolver = TimelineSlideResolver(profile)
+
+    commands = resolver.slide_commands()
+
+    assert [command.slide_number for command in commands] == [1, 2]
+    assert commands[0].lyrics == "Amazing grace\nHow sweet the sound"
+    assert commands[1].reference_timestamp == pytest.approx(5.0)
+
+
 def test_resolver_groups_consecutive_line_cues_into_single_slide_output() -> None:
     profile = ReferenceProfile(
         name="song-a",

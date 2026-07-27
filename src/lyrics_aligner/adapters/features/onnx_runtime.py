@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast
 
 import numpy as np
 
+from lyrics_aligner.adapters.features.pitch import estimate_normalized_pitch
 from lyrics_aligner.domain.models import AudioChunk, FeatureFrame
 
 
@@ -27,6 +28,7 @@ class InferenceSession(Protocol):
 class OnnxFeatureExtractorConfig:
     model_path: str
     sample_rate: int = 16_000
+    append_pitch_feature: bool = False
 
     def __post_init__(self) -> None:
         if not self.model_path:
@@ -35,6 +37,8 @@ class OnnxFeatureExtractorConfig:
             raise TypeError("sample_rate must be an integer")
         if self.sample_rate <= 0:
             raise ValueError("sample_rate must be greater than zero")
+        if not isinstance(self.append_pitch_feature, bool):
+            raise TypeError("append_pitch_feature must be a boolean")
 
 
 class OnnxFeatureExtractor:
@@ -50,6 +54,10 @@ class OnnxFeatureExtractor:
         self._input_name = self._session.get_inputs()[0].name
         self._output_names = [output.name for output in self._session.get_outputs()]
 
+    @property
+    def pitch_contour_enabled(self) -> bool:
+        return self._config.append_pitch_feature
+
     def extract(self, chunk: AudioChunk) -> list[FeatureFrame]:
         samples = np.asarray(chunk.samples, dtype=np.float32)
         if samples.size == 0:
@@ -64,9 +72,13 @@ class OnnxFeatureExtractor:
 
         feature_rows = self._feature_rows(np.asarray(outputs[0], dtype=np.float32))
         frame_duration = (samples.size / self._config.sample_rate) / len(feature_rows)
+        boundaries = np.linspace(0, samples.size, num=len(feature_rows) + 1, dtype=np.int32)
         return [
             FeatureFrame(
-                values=np.array(row, dtype=np.float32, copy=True),
+                values=self._build_feature_values(
+                    np.asarray(row, dtype=np.float32),
+                    samples[boundaries[index] : boundaries[index + 1]],
+                ),
                 observed_at=chunk.captured_at + index * frame_duration,
                 frame_duration_seconds=frame_duration,
             )
@@ -85,6 +97,24 @@ class OnnxFeatureExtractor:
             batch_size, sequence_length, feature_size = features.shape
             return features.reshape(batch_size * sequence_length, feature_size)
         return features.reshape(features.shape[0], -1)
+
+    def _build_feature_values(
+        self,
+        row: np.ndarray,
+        segment_samples: np.ndarray,
+    ) -> np.ndarray:
+        if not self._config.append_pitch_feature:
+            return np.array(row, dtype=np.float32, copy=True)
+        pitch_feature = estimate_normalized_pitch(
+            segment_samples,
+            sample_rate=self._config.sample_rate,
+        )
+        return np.concatenate(
+            [
+                np.array(row, dtype=np.float32, copy=True),
+                np.array([pitch_feature], dtype=np.float32),
+            ]
+        )
 
     @staticmethod
     def _create_session(model_path: str) -> InferenceSession:

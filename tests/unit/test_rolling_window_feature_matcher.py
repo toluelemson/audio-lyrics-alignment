@@ -184,6 +184,9 @@ def test_match_biases_toward_persisted_correction_anchor() -> None:
                 section="Verse 2",
                 lyrics="Target slide",
                 correction_count=3,
+                session_count=2,
+                support_score=3.0,
+                last_seen_at="2026-07-26T00:00:00+00:00",
             ),
         ),
     )

@@ -129,6 +129,18 @@ class TimelineSlideResolver:
                 )
         raise ValueError(f"Unknown slide number: {slide_number}")
 
+    def slide_commands(self) -> tuple[SlideCommand, ...]:
+        return tuple(
+            SlideCommand(
+                slide_number=cue.slide_number,
+                section=cue.section,
+                lyrics=cue.lyrics,
+                reference_timestamp=cue.reference_timestamp,
+                confidence=1.0,
+            )
+            for cue in self._slide_groups
+        )
+
     def _skip_stale_cues(self, reference_timestamp: float) -> None:
         while self._next_index < len(self._slide_groups):
             cue = self._slide_groups[self._next_index]

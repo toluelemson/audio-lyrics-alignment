@@ -111,6 +111,8 @@ class ReferenceProfileBuilder:
             "audio_path": str(Path(audio_path).resolve()),
             "slides_path": str(Path(slides_path).resolve()),
         }
+        if bool(getattr(self._feature_extractor, "pitch_contour_enabled", False)):
+            metadata["pitch_contour_enabled"] = "1"
         if companion_audio_path is not None:
             metadata["companion_audio_path"] = str(
                 Path(companion_audio_path).expanduser().resolve()

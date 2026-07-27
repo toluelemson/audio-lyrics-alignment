@@ -102,6 +102,38 @@ def test_extract_splits_sequence_model_outputs_into_per_step_feature_frames() ->
     assert frames[0].frame_duration_seconds == pytest.approx(0.002)
 
 
+def test_extract_can_append_pitch_contour_feature() -> None:
+    session = _StubSession(
+        outputs=[
+            np.array(
+                [[1.0, 2.0]],
+                dtype=np.float32,
+            )
+        ]
+    )
+    extractor = OnnxFeatureExtractor(
+        OnnxFeatureExtractorConfig(
+            model_path="dummy.onnx",
+            sample_rate=1_000,
+            append_pitch_feature=True,
+        ),
+        session=session,
+    )
+
+    frames = extractor.extract(
+        AudioChunk(
+            samples=np.array([0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0], dtype=np.float32),
+            captured_at=1.0,
+            sequence_number=0,
+        )
+    )
+
+    assert len(frames) == 1
+    assert frames[0].values.shape == (3,)
+    np.testing.assert_array_equal(frames[0].values[:2], np.array([1.0, 2.0], dtype=np.float32))
+    assert frames[0].values[2] != 0.0
+
+
 def test_empty_chunk_produces_no_frames() -> None:
     extractor = OnnxFeatureExtractor(
         OnnxFeatureExtractorConfig(model_path="dummy.onnx"),
@@ -142,12 +174,14 @@ def test_conforms_to_feature_extractor_port() -> None:
         ("model_path", "", ValueError),
         ("sample_rate", 0, ValueError),
         ("sample_rate", 16_000.0, TypeError),
+        ("append_pitch_feature", "yes", TypeError),
     ],
 )
 def test_rejects_invalid_configuration(field: str, value: object, error: type[Exception]) -> None:
     values: dict[str, object] = {
         "model_path": "model.onnx",
         "sample_rate": 16_000,
+        "append_pitch_feature": False,
     }
     values[field] = value
 

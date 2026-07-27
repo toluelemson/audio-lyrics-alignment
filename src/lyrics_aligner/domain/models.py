@@ -59,11 +59,14 @@ class SlideCue:
 class OperatorCorrectionRecord:
     profile_name: str
     detected_reference_timestamp: float | None
+    detected_confidence: float | None
     chosen_reference_timestamp: float
     chosen_slide_number: int
     chosen_section: str
     chosen_lyrics: str
     created_at: str
+    no_vocal_detected: bool = False
+    session_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,3 +78,6 @@ class CorrectionAnchor:
     section: str
     lyrics: str
     correction_count: int
+    session_count: int = 0
+    support_score: float = 0.0
+    last_seen_at: str = ""

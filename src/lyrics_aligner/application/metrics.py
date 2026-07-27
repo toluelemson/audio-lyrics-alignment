@@ -6,6 +6,7 @@ class RuntimeMetrics:
     chunks_received: int = 0
     chunks_dropped: int = 0
     silent_chunks: int = 0
+    non_voiced_chunks: int = 0
     clipped_chunks: int = 0
     feature_frames_processed: int = 0
     invalid_inference_outputs: int = 0

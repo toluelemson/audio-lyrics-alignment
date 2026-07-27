@@ -15,6 +15,7 @@ from lyrics_aligner.application.runtime import (
     AudioIngestionRuntime,
     BoundedAudioQueue,
     ManualOverrideController,
+    RuntimeStatusSnapshot,
 )
 from lyrics_aligner.domain.models import (
     FeatureFrame,
@@ -217,6 +218,18 @@ class LowConfidenceFeatureExtractor:
         return [
             FeatureFrame(
                 values=np.array([0.7, 0.7], dtype=np.float32),
+                observed_at=1.0,
+                frame_duration_seconds=0.01,
+            )
+        ]
+
+
+class UnvoicedPitchFeatureExtractor:
+    def extract(self, chunk: object) -> list[FeatureFrame]:
+        del chunk
+        return [
+            FeatureFrame(
+                values=np.array([0.1, 0.2, 0.0], dtype=np.float32),
                 observed_at=1.0,
                 frame_duration_seconds=0.01,
             )
@@ -456,23 +469,37 @@ class RecordingCorrectionSink:
         *,
         profile_name: str,
         detected_reference_timestamp: float | None,
+        detected_confidence: float | None = None,
         chosen_reference_timestamp: float,
         chosen_slide_number: int,
         chosen_section: str,
         chosen_lyrics: str,
+        no_vocal_detected: bool = False,
+        session_id: str = "",
     ) -> OperatorCorrectionRecord:
         return OperatorCorrectionRecord(
             profile_name=profile_name,
             detected_reference_timestamp=detected_reference_timestamp,
+            detected_confidence=detected_confidence,
             chosen_reference_timestamp=chosen_reference_timestamp,
             chosen_slide_number=chosen_slide_number,
             chosen_section=chosen_section,
             chosen_lyrics=chosen_lyrics,
             created_at="2026-07-25T00:00:00+00:00",
+            no_vocal_detected=no_vocal_detected,
+            session_id=session_id,
         )
 
     def record(self, record: OperatorCorrectionRecord) -> None:
         self.records.append(record)
+
+
+class RecordingStatusObserver:
+    def __init__(self) -> None:
+        self.snapshots: list[RuntimeStatusSnapshot] = []
+
+    def update(self, snapshot: RuntimeStatusSnapshot) -> None:
+        self.snapshots.append(snapshot)
 
 
 def test_runtime_sends_slide_command_when_resolver_returns_one() -> None:
@@ -621,6 +648,33 @@ def test_runtime_brief_silence_holds_timeline_and_can_continue_slide_progression
     assert gateway.commands[0].slide_number == 2
 
 
+def test_runtime_detects_non_voiced_chunks_for_pitch_aware_profiles() -> None:
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.02,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-no-vocal"),
+        feature_extractor=UnvoicedPitchFeatureExtractor(),
+        diagnostics_interval_seconds=1.0,
+        vocal_presence_detection_enabled=True,
+        silence_reset_chunk_count=3,
+        audio_sample_rate_hz=1_000,
+    )
+
+    report = runtime.run()
+
+    assert report.metrics.non_voiced_chunks == 2
+    assert report.metrics.accepted_matches == 0
+    assert report.no_vocal_detected is True
+
+
 def test_runtime_suppresses_slide_command_during_manual_override() -> None:
     extractor: FeatureExtractor = RepeatingFeatureExtractor()
     matcher: FeatureMatcher = SequenceMatcher(
@@ -753,5 +807,70 @@ def test_runtime_jump_to_slide_activates_manual_override_and_reanchors() -> None
     assert len(correction_sink.records) == 1
     assert correction_sink.records[0].profile_name == "song-a"
     assert correction_sink.records[0].detected_reference_timestamp == 12.5
+    assert correction_sink.records[0].detected_confidence == 0.95
     assert correction_sink.records[0].chosen_reference_timestamp == 30.0
     assert correction_sink.records[0].chosen_slide_number == 3
+    assert correction_sink.records[0].session_id != ""
+
+
+def test_runtime_exposes_operator_slide_targets() -> None:
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.01,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-operator-targets"),
+        operator_slide_targets=(
+            SlideCommand(1, "Verse 1", "Amazing grace", 1.0, 1.0),
+            SlideCommand(2, "Verse 2", "How sweet the sound", 5.0, 1.0),
+        ),
+    )
+
+    assert [target.slide_number for target in runtime.operator_slide_targets()] == [1, 2]
+
+
+def test_runtime_marks_alignment_hold_for_low_confidence_matches() -> None:
+    observer = RecordingStatusObserver()
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.01,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-alignment-hold"),
+        feature_extractor=LowConfidenceFeatureExtractor(),
+        feature_matcher=NearestNeighborFeatureMatcher(
+            ReferenceProfile(
+                name="song-a",
+                frames=(
+                    FeatureFrame(
+                        values=np.array([0.1, 0.2], dtype=np.float32),
+                        observed_at=0.0,
+                        frame_duration_seconds=0.01,
+                    ),
+                ),
+                metadata={},
+            ),
+            NearestNeighborFeatureMatcherConfig(confidence_threshold=0.95),
+        ),
+        diagnostics_interval_seconds=1.0,
+        status_observer=observer,
+    )
+
+    report = runtime.run()
+
+    assert report.alignment_hold_active is True
+    assert report.alignment_hold_reason == "low_confidence"
+    assert observer.snapshots[-1].alignment_hold_active is True
+    assert observer.snapshots[-1].alignment_hold_reason == "low_confidence"

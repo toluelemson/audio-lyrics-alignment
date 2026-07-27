@@ -160,6 +160,30 @@ HTML = """<!doctype html>
       gap: 10px;
       align-items: end;
     }
+    .targets {
+      display: grid;
+      gap: 10px;
+      margin-top: 18px;
+      max-height: 22rem;
+      overflow: auto;
+    }
+    .target {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: rgba(255,255,255,0.66);
+      text-align: left;
+    }
+    .target.active {
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+      box-shadow: 0 0 0 3px rgba(163, 74, 39, 0.12);
+      background: linear-gradient(135deg, #fff1e6 0%, #fffaf4 100%);
+    }
+    .target-meta {
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin-bottom: 6px;
+    }
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
       .status { grid-template-columns: 1fr; }
@@ -180,6 +204,8 @@ HTML = """<!doctype html>
           <div class="stat"><div class="label">Slide</div><div class="value" id="slideState">none</div></div>
           <div class="stat"><div class="label">Confidence</div><div class="value" id="confidenceState">0.00</div></div>
           <div class="stat"><div class="label">Manual</div><div class="value" id="manualState">auto</div></div>
+          <div class="stat"><div class="label">Vocal</div><div class="value" id="vocalState">unknown</div></div>
+          <div class="stat"><div class="label">Hold</div><div class="value" id="holdState">none</div></div>
         </div>
 
         <form id="startForm">
@@ -228,6 +254,9 @@ HTML = """<!doctype html>
         </div>
 
         <div class="banner" id="banner"></div>
+
+        <div class="label" style="margin:18px 0 10px">Operator Jump Targets</div>
+        <div class="targets" id="targetsView"></div>
       </section>
 
       <section class="card">
@@ -246,10 +275,13 @@ HTML = """<!doctype html>
     const slideState = document.getElementById("slideState");
     const confidenceState = document.getElementById("confidenceState");
     const manualState = document.getElementById("manualState");
+    const vocalState = document.getElementById("vocalState");
+    const holdState = document.getElementById("holdState");
     const device = document.getElementById("device");
     const banner = document.getElementById("banner");
     const snapshotView = document.getElementById("snapshotView");
     const logsView = document.getElementById("logsView");
+    const targetsView = document.getElementById("targetsView");
     const stopButton = document.getElementById("stopButton");
     const refreshButton = document.getElementById("refreshButton");
     const manualOnButton = document.getElementById("manualOnButton");
@@ -290,8 +322,51 @@ HTML = """<!doctype html>
         ? snapshot.last_match.confidence.toFixed(2)
         : "0.00";
       manualState.textContent = snapshot && snapshot.manual_override_active ? "manual" : "auto";
+      vocalState.textContent = snapshot
+        ? (snapshot.no_vocal_detected ? "no vocal" : "voiced/ok")
+        : "unknown";
+      holdState.textContent = snapshot && snapshot.alignment_hold_active
+        ? (snapshot.alignment_hold_reason || "hold")
+        : "none";
       snapshotView.textContent = JSON.stringify(snapshot, null, 2);
       logsView.textContent = (payload.logs || []).join("\\n") || "No logs yet.";
+
+      targetsView.innerHTML = "";
+      const slideTargets = payload.slide_targets || [];
+      if (!slideTargets.length) {
+        targetsView.textContent = "Start runtime with a reference profile to load jump targets.";
+        return;
+      }
+      slideTargets.forEach((target) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "target";
+        const activeSlide = snapshot && snapshot.last_slide_command
+          ? snapshot.last_slide_command.slide_number
+          : null;
+        if (activeSlide === target.slide_number) {
+          button.classList.add("active");
+        }
+        button.innerHTML = `
+          <div class="target-meta">Slide ${target.slide_number} · ${target.reference_timestamp.toFixed(2)}s</div>
+          <div><strong>${target.section}</strong></div>
+          <div>${target.lyrics}</div>
+        `;
+        button.addEventListener("click", async () => {
+          try {
+            state.payload = await api("/api/jump", {
+              method: "POST",
+              body: JSON.stringify({ slide_number: target.slide_number }),
+            });
+            document.getElementById("jumpSlide").value = String(target.slide_number);
+            setBanner(`Jumped to slide ${target.slide_number}.`);
+            render();
+          } catch (error) {
+            setBanner(error.message, "error");
+          }
+        });
+        targetsView.appendChild(button);
+      });
     }
 
     async function loadStatus() {
@@ -452,6 +527,7 @@ class RuntimeManager:
         self._thread: Thread | None = None
         self._report = None
         self._error: str | None = None
+        self._slide_targets: list[dict[str, object]] = []
         self._lock = Lock()
         self.status_collector = StatusCollector()
         self.log_buffer = LogBuffer()
@@ -483,6 +559,15 @@ class RuntimeManager:
                 status_observer=self.status_collector,
             )
             self._runtime = runtime
+            self._slide_targets = [
+                {
+                    "slide_number": command.slide_number,
+                    "section": command.section,
+                    "lyrics": command.lyrics,
+                    "reference_timestamp": command.reference_timestamp,
+                }
+                for command in runtime.operator_slide_targets()
+            ]
 
             def run_runtime() -> None:
                 try:
@@ -517,6 +602,10 @@ class RuntimeManager:
     def error(self) -> str | None:
         with self._lock:
             return self._error
+
+    def slide_targets(self) -> list[dict[str, object]]:
+        with self._lock:
+            return list(self._slide_targets)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -585,6 +674,7 @@ def main() -> None:
                 "snapshot": _snapshot_to_dict(snapshot),
                 "report": None if manager.report() is None else asdict(manager.report()),
                 "error": manager.error(),
+                "slide_targets": manager.slide_targets(),
                 "logs": manager.log_buffer.messages()[-80:],
             }
 

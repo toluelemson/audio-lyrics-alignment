@@ -243,7 +243,8 @@ class RollingWindowFeatureMatcher:
             ) <= self._config.anchor_target_tolerance_seconds
             if not np.any(target_mask):
                 continue
-            bias = min(anchor.correction_count, 5) * self._config.anchor_bias
+            support_units = anchor.support_score if anchor.support_score > 0.0 else float(anchor.correction_count)
+            bias = min(support_units, 5.0) * self._config.anchor_bias
             adjusted[target_mask] = np.maximum(0.0, adjusted[target_mask] - bias)
         return adjusted
 
