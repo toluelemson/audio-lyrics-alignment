@@ -1,0 +1,50 @@
+[
+  {
+    "slide_number": 1,
+    "section": "Intro",
+    "lyrics": "Demo line 1",
+    "reference_timestamp": 0.0
+  },
+  {
+    "slide_number": 2,
+    "section": "Verse 1",
+    "lyrics": "Demo line 2",
+    "reference_timestamp": 4.0
+  },
+  {
+    "slide_number": 3,
+    "section": "Pre-Chorus",
+    "lyrics": "Demo line 3",
+    "reference_timestamp": 8.0
+  },
+  {
+    "slide_number": 4,
+    "section": "Chorus",
+    "lyrics": "Demo line 4",
+    "reference_timestamp": 12.0
+  },
+  {
+    "slide_number": 5,
+    "section": "Verse 2",
+    "lyrics": "Demo line 5",
+    "reference_timestamp": 16.0
+  },
+  {
+    "slide_number": 6,
+    "section": "Bridge",
+    "lyrics": "Demo line 6",
+    "reference_timestamp": 20.0
+  },
+  {
+    "slide_number": 7,
+    "section": "Chorus 2",
+    "lyrics": "Demo line 7",
+    "reference_timestamp": 24.0
+  },
+  {
+    "slide_number": 8,
+    "section": "Outro",
+    "lyrics": "Demo line 8",
+    "reference_timestamp": 28.0
+  }
+]

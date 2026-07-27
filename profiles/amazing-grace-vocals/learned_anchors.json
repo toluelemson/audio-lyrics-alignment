@@ -1,0 +1,99 @@
+{
+  "line_anchors": [
+    {
+      "line_index": 0,
+      "reference_timestamp": 0.0,
+      "section_key": "verse-1",
+      "section_label": "Verse 1",
+      "slide_number": 1,
+      "text": "Amazing Grace"
+    },
+    {
+      "line_index": 1,
+      "reference_timestamp": 5.416666666666667,
+      "section_key": "verse-1",
+      "section_label": "Verse 1",
+      "slide_number": 1,
+      "text": "How sweet the sound,"
+    },
+    {
+      "line_index": 4,
+      "reference_timestamp": 21.666666666666668,
+      "section_key": "verse-1",
+      "section_label": "Verse 1",
+      "slide_number": 1,
+      "text": "But now am found;"
+    },
+    {
+      "line_index": 5,
+      "reference_timestamp": 27.083333333333336,
+      "section_key": "verse-1",
+      "section_label": "Verse 1",
+      "slide_number": 1,
+      "text": "Was blind, but now I see."
+    },
+    {
+      "line_index": 2,
+      "reference_timestamp": 40.166666666666664,
+      "section_key": "verse-2",
+      "section_label": "Verse 2",
+      "slide_number": 2,
+      "text": "And grace my fears relieved;"
+    },
+    {
+      "line_index": 4,
+      "reference_timestamp": 47.833333333333336,
+      "section_key": "verse-2",
+      "section_label": "Verse 2",
+      "slide_number": 2,
+      "text": "Did that grace appear"
+    },
+    {
+      "line_index": 5,
+      "reference_timestamp": 51.66666666666667,
+      "section_key": "verse-2",
+      "section_label": "Verse 2",
+      "slide_number": 2,
+      "text": "The hour I first believed!"
+    },
+    {
+      "line_index": 0,
+      "reference_timestamp": 0.0,
+      "section_key": "verse-1",
+      "section_label": "Verse 1",
+      "slide_number": 1,
+      "text": "Amazing Grace"
+    },
+    {
+      "line_index": 1,
+      "reference_timestamp": 5.416666666666667,
+      "section_key": "verse-1",
+      "section_label": "Verse 1",
+      "slide_number": 1,
+      "text": "How sweet the sound,"
+    },
+    {
+      "line_index": 2,
+      "reference_timestamp": 10.833333333333334,
+      "section_key": "verse-1",
+      "section_label": "Verse 1",
+      "slide_number": 1,
+      "text": "That saved a wretch like me!"
+    }
+  ],
+  "section_anchors": [
+    {
+      "reference_timestamp": 92.0,
+      "section_key": "verse-4",
+      "section_label": "Verse 4",
+      "slide_number": 4
+    },
+    {
+      "reference_timestamp": 92.0,
+      "section_key": "verse-4",
+      "section_label": "Verse 4",
+      "slide_number": 4
+    }
+  ],
+  "version": 1
+}

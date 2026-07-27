@@ -1,0 +1,40 @@
+{
+  "name": "amazing-grace",
+  "sections": [
+    {
+      "key": "verse-1",
+      "label": "Verse 1",
+      "slide_numbers": [1]
+    },
+    {
+      "key": "verse-2",
+      "label": "Verse 2",
+      "slide_numbers": [2]
+    },
+    {
+      "key": "verse-3",
+      "label": "Verse 3",
+      "slide_numbers": [3]
+    },
+    {
+      "key": "verse-4",
+      "label": "Verse 4",
+      "slide_numbers": [4]
+    },
+    {
+      "key": "verse-5",
+      "label": "Verse 5",
+      "slide_numbers": [5]
+    },
+    {
+      "key": "verse-6",
+      "label": "Verse 6",
+      "slide_numbers": [6]
+    },
+    {
+      "key": "verse-7",
+      "label": "Verse 7",
+      "slide_numbers": [7]
+    }
+  ]
+}
