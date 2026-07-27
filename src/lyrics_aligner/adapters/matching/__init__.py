@@ -1,5 +1,10 @@
 """Feature matching adapters."""
 
+from lyrics_aligner.adapters.matching.coarse_fingerprint import (
+    CoarseAnchorFeatureMatcher,
+    CoarseFingerprintMatcher,
+    CoarseFingerprintMatcherConfig,
+)
 from lyrics_aligner.adapters.matching.nearest_neighbor import (
     NearestNeighborFeatureMatcher,
     NearestNeighborFeatureMatcherConfig,
@@ -18,6 +23,9 @@ from lyrics_aligner.adapters.matching.tracking import (
 )
 
 __all__ = [
+    "CoarseAnchorFeatureMatcher",
+    "CoarseFingerprintMatcher",
+    "CoarseFingerprintMatcherConfig",
     "NearestNeighborFeatureMatcher",
     "NearestNeighborFeatureMatcherConfig",
     "RollingWindowFeatureMatcher",

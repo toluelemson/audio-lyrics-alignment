@@ -85,15 +85,13 @@ class SongLibrary:
         self,
         *,
         title: str,
-        lyrics_text: str,
+        lyrics_text: str = "",
         audio_filename: str = "",
         audio_bytes: bytes = b"",
     ) -> SongRecord:
         normalized_title = title.strip()
         if not normalized_title:
             raise ValueError("title must not be empty")
-        if not lyrics_text.strip():
-            raise ValueError("lyrics text must not be empty")
         if bool(audio_filename.strip()) != bool(audio_bytes):
             raise ValueError("audio filename and audio bytes must be provided together")
 
@@ -120,11 +118,18 @@ class SongLibrary:
         else:
             reference_audio_filename = ""
 
-        normalized_lyrics = _normalize_lyrics_text(lyrics_text)
-        (song_path / lyrics_filename).write_text(normalized_lyrics + "\n", encoding="utf-8")
-        slides = build_slide_template(
-            normalized_lyrics,
-            SlideTemplateConfig(initial_timestamp=0.0, timestamp_step=20.0),
+        normalized_lyrics = _normalize_lyrics_text(lyrics_text) if lyrics_text.strip() else ""
+        (song_path / lyrics_filename).write_text(
+            f"{normalized_lyrics}\n" if normalized_lyrics else "",
+            encoding="utf-8",
+        )
+        slides = (
+            build_slide_template(
+                normalized_lyrics,
+                SlideTemplateConfig(initial_timestamp=0.0, timestamp_step=20.0),
+            )
+            if normalized_lyrics
+            else ()
         )
         (song_path / slides_filename).write_text(
             json.dumps(
@@ -431,6 +436,30 @@ class SongLibrary:
             return self._record_from_entry(entry)
         raise ValueError(f"unknown song id: {song_id}")
 
+    def replace_slides(
+        self,
+        song_id: str,
+        slides: list[dict[str, object]],
+    ) -> SongRecord:
+        payload = self._read_index()
+        for index, entry in enumerate(payload):
+            if str(entry["song_id"]) != song_id:
+                continue
+            record = self._record_from_entry(entry)
+            song_path = self.song_path(song_id)
+            self._write_slides_file(song_path / record.slides_filename, slides)
+            profile_directory = str(entry.get("profile_directory", ""))
+            if profile_directory:
+                profile_path = song_path / profile_directory
+                if profile_path.exists():
+                    shutil.rmtree(profile_path)
+            entry["profile_directory"] = ""
+            entry["updated_at"] = _utc_now()
+            payload[index] = entry
+            self._write_index(payload)
+            return self._record_from_entry(entry)
+        raise ValueError(f"unknown song id: {song_id}")
+
     def delete_song(self, song_id: str) -> None:
         payload = self._read_index()
         remaining = [entry for entry in payload if str(entry["song_id"]) != song_id]
@@ -459,6 +488,12 @@ class SongLibrary:
     def lyrics_path(self, song_id: str) -> Path:
         record = self.get_song(song_id)
         return self.song_path(song_id) / record.lyrics_filename
+
+    def lyrics_text(self, song_id: str) -> str:
+        path = self.lyrics_path(song_id)
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8").strip()
 
     def reference_audio_path(self, song_id: str) -> Path | None:
         record = self.get_song(song_id)
@@ -503,6 +538,30 @@ class SongLibrary:
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _write_slides_file(path: Path, slides: list[dict[str, object]]) -> None:
+        validated: list[dict[str, object]] = []
+        for entry in slides:
+            if not isinstance(entry, dict):
+                raise ValueError("slide entry must be a JSON object")
+            slide_number = entry.get("slide_number")
+            section = entry.get("section")
+            lyrics = entry.get("lyrics")
+            if isinstance(slide_number, bool) or not isinstance(slide_number, int) or slide_number <= 0:
+                raise ValueError("slide_number must be a positive integer")
+            if not isinstance(section, str) or not section.strip():
+                raise ValueError("section must be a non-empty string")
+            if not isinstance(lyrics, str) or not lyrics.strip():
+                raise ValueError("lyrics must be a non-empty string")
+            validated.append(
+                {
+                    "slide_number": slide_number,
+                    "section": section.strip(),
+                    "lyrics": lyrics.strip(),
+                }
+            )
+        path.write_text(json.dumps(validated, indent=2) + "\n", encoding="utf-8")
 
     def _sync_timings_to_clip(
         self,

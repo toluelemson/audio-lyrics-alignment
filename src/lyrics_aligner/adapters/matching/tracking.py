@@ -25,6 +25,8 @@ class TrackingFeatureMatcherConfig:
     anchored_timeline_tolerance_seconds: float = 1.5
     max_forward_jump_seconds: float = 0.35
     max_backward_jump_seconds: float = 0.2
+    ambiguous_second_distance_gap_threshold: float = 0.01
+    ambiguous_second_time_gap_seconds: float = 0.5
     lost_match_patience: int = 3
     anchored_timeline_confidence: float = 0.95
 
@@ -59,6 +61,14 @@ class TrackingFeatureMatcherConfig:
             raise ValueError("max_forward_jump_seconds must be non-negative")
         if self.max_backward_jump_seconds < 0.0:
             raise ValueError("max_backward_jump_seconds must be non-negative")
+        if self.ambiguous_second_distance_gap_threshold < 0.0:
+            raise ValueError(
+                "ambiguous_second_distance_gap_threshold must be non-negative"
+            )
+        if self.ambiguous_second_time_gap_seconds < 0.0:
+            raise ValueError(
+                "ambiguous_second_time_gap_seconds must be non-negative"
+            )
         if self.lost_match_patience <= 0:
             raise ValueError("lost_match_patience must be greater than zero")
         if not 0.0 <= self.anchored_timeline_confidence <= 1.0:
@@ -113,6 +123,7 @@ class TrackingFeatureMatcher:
         self._global_reacquire_streak = 0
         self._lost_count = 0
         self._anchored_timeline_active = False
+        self._manual_anchor_active = False
         self._last_decision: TrackingDecision | None = None
 
     @property
@@ -134,6 +145,7 @@ class TrackingFeatureMatcher:
         self._lost_count = 0
         self._tracking_miss_count = 0
         self._anchored_timeline_active = False
+        self._manual_anchor_active = False
         self._last_decision = None
 
     def force_anchor(
@@ -151,6 +163,7 @@ class TrackingFeatureMatcher:
         self._tracking_miss_count = 0
         self._lost_count = 0
         self._anchored_timeline_active = True
+        self._manual_anchor_active = True
         self._reset_search()
         self._reset_recovery()
         self._reset_global_reacquire()
@@ -359,7 +372,7 @@ class TrackingFeatureMatcher:
             self._lost_count += 1
             self._reset_recovery()
             if self._lost_count >= self._config.lost_match_patience:
-                self._state = "SEARCHING"
+                self._state = "UNCERTAIN" if self._manual_anchor_active else "SEARCHING"
                 self._lost_count = 0
                 self._reset_search()
                 self._reset_global_reacquire()
@@ -368,7 +381,11 @@ class TrackingFeatureMatcher:
                     previous_state,
                     result,
                     accepted=False,
-                    reason="recovery_failed_back_to_search",
+                    reason=(
+                        "recovery_failed_waiting_for_manual_reanchor"
+                        if self._manual_anchor_active
+                        else "recovery_failed_back_to_search"
+                    ),
                 )
                 return result
             result = self._invalidate(candidate)
@@ -448,6 +465,8 @@ class TrackingFeatureMatcher:
             return False
         if candidate.confidence < self._config.tracking_confidence_threshold:
             return False
+        if self._is_matcher_ambiguity_unacceptable():
+            return False
         if not self._is_expected_position_acceptable(
             observed_at,
             candidate.reference_timestamp,
@@ -464,6 +483,8 @@ class TrackingFeatureMatcher:
             return False
         if candidate.confidence < self._config.recovery_confidence_threshold:
             return False
+        if self._is_matcher_ambiguity_unacceptable():
+            return False
         if not self._is_expected_position_acceptable(
             observed_at,
             candidate.reference_timestamp,
@@ -476,6 +497,8 @@ class TrackingFeatureMatcher:
             return "tracking_rejected_invalid_candidate"
         if candidate.confidence < self._config.tracking_confidence_threshold:
             return "tracking_rejected_low_confidence"
+        if self._is_matcher_ambiguity_unacceptable():
+            return "tracking_rejected_ambiguous_candidate"
         if not self._is_expected_position_acceptable(
             observed_at,
             candidate.reference_timestamp,
@@ -488,12 +511,27 @@ class TrackingFeatureMatcher:
             return "recovery_rejected_invalid_candidate"
         if candidate.confidence < self._config.recovery_confidence_threshold:
             return "recovery_rejected_low_confidence"
+        if self._is_matcher_ambiguity_unacceptable():
+            return "recovery_rejected_ambiguous_candidate"
         if not self._is_expected_position_acceptable(
             observed_at,
             candidate.reference_timestamp,
         ):
             return "recovery_rejected_outside_expected_window"
         return "recovery_rejected_large_jump"
+
+    def _is_matcher_ambiguity_unacceptable(self) -> bool:
+        matcher_decision = getattr(self._matcher, "last_decision", None)
+        if matcher_decision is None:
+            return False
+        second_gap = getattr(matcher_decision, "second_distance_gap", None)
+        second_time_gap = getattr(matcher_decision, "second_time_gap_seconds", None)
+        if second_gap is None or second_time_gap is None:
+            return False
+        return (
+            second_gap <= self._config.ambiguous_second_distance_gap_threshold
+            and second_time_gap >= self._config.ambiguous_second_time_gap_seconds
+        )
 
     def _is_relative_jump_acceptable(self, candidate_timestamp: float) -> bool:
         if self._last_accepted_timestamp is None:
@@ -558,7 +596,13 @@ class TrackingFeatureMatcher:
         frame: FeatureFrame,
         candidate: MatchResult,
     ) -> MatchResult | None:
-        if not self._anchored_timeline_active:
+        if not self._anchored_timeline_active or not self._manual_anchor_active:
+            return None
+        if candidate.confidence < self._config.recovery_confidence_threshold:
+            return None
+        if not self._matcher_reason_allows_anchor_guidance():
+            return None
+        if self._is_matcher_ambiguity_unacceptable():
             return None
         self._ensure_timeline_origin(frame.observed_at)
         if self._timeline_origin_observed_at is None:
@@ -567,19 +611,28 @@ class TrackingFeatureMatcher:
             0.0,
             frame.observed_at - self._timeline_origin_observed_at,
         )
-        frame_duration = max(frame.frame_duration_seconds, 1e-6)
-        reference_frame = max(0, int(round(expected_timestamp / frame_duration)))
+        reference_frame = (
+            self._last_accepted_frame
+            if self._last_accepted_frame is not None
+            else (candidate.reference_frame if candidate.reference_frame >= 0 else 0)
+        )
         return MatchResult(
             reference_frame=reference_frame,
             reference_timestamp=expected_timestamp,
             raw_distance=candidate.raw_distance,
             normalized_distance=candidate.normalized_distance,
-            confidence=max(
-                candidate.confidence,
-                self._config.anchored_timeline_confidence,
-            ),
+            confidence=candidate.confidence,
             valid=True,
         )
+
+    def _matcher_reason_allows_anchor_guidance(self) -> bool:
+        matcher_decision = getattr(self._matcher, "last_decision", None)
+        if matcher_decision is None:
+            return True
+        reason = getattr(matcher_decision, "reason", None)
+        if reason is None:
+            return True
+        return reason == "accepted"
 
     def _reset_search(self) -> None:
         self._search_anchor_timestamp = None
@@ -606,6 +659,9 @@ class TrackingFeatureMatcher:
         candidate: MatchResult,
         previous_state: str,
     ) -> MatchResult | None:
+        if self._manual_anchor_active:
+            self._reset_global_reacquire()
+            return None
         if not candidate.valid or candidate.confidence < self._config.recovery_confidence_threshold:
             self._reset_global_reacquire()
             return None

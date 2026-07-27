@@ -67,6 +67,26 @@ class BoundedAudioQueue:
                 return self._items.popleft()
             return None
 
+    def get_latest(self, timeout: float | None = None) -> tuple[AudioChunk | None, int]:
+        with self._condition:
+            if timeout is None:
+                while not self._items and not self._closed:
+                    self._condition.wait()
+            else:
+                deadline = monotonic() + timeout
+                while not self._items and not self._closed:
+                    remaining = deadline - monotonic()
+                    if remaining <= 0:
+                        return None, 0
+                    self._condition.wait(remaining)
+
+            if not self._items:
+                return None, 0
+            dropped = max(0, len(self._items) - 1)
+            latest = self._items.pop()
+            self._items.clear()
+            return latest, dropped
+
     def qsize(self) -> int:
         with self._condition:
             return len(self._items)
@@ -173,6 +193,7 @@ class RuntimeReport:
     tracking_state: str | None
     last_match: MatchResult | None
     last_slide_command: SlideCommand | None
+    matched_slide_command: SlideCommand | None = None
     current_section_key: str | None = None
     current_section_label: str | None = None
     current_section_slide_number: int | None = None
@@ -198,6 +219,7 @@ class RuntimeStatusSnapshot:
     tracking_state: str | None
     last_match: MatchResult | None
     last_slide_command: SlideCommand | None
+    matched_slide_command: SlideCommand | None = None
     current_section_key: str | None = None
     current_section_label: str | None = None
     current_section_slide_number: int | None = None
@@ -243,6 +265,14 @@ class AudioIngestionRuntime:
         audio_sample_rate_hz: int = 16_000,
         vocal_presence_detection_enabled: bool = False,
         voiced_pitch_threshold: float = 0.02,
+        timeline_hold_max_seconds: float = 4.0,
+        queue_catchup_threshold: int = 4,
+        clock_resync_tolerance_seconds: float = 3.0,
+        fast_forward_accept_tolerance_seconds: float = 6.0,
+        fast_forward_confidence_floor: float = 0.8,
+        reacquire_consistency_tolerance_seconds: float = 2.0,
+        reacquire_min_consecutive_matches: int = 2,
+        reacquire_min_duration_seconds: float = 0.0,
         emit_diagnostic_logs: bool = True,
         emit_match_debug_logs: bool = False,
     ) -> None:
@@ -270,6 +300,18 @@ class AudioIngestionRuntime:
         self._session_id = uuid4().hex
         self._vocal_presence_detection_enabled = vocal_presence_detection_enabled
         self._voiced_pitch_threshold = voiced_pitch_threshold
+        self._timeline_hold_max_seconds = timeline_hold_max_seconds
+        self._queue_catchup_threshold = queue_catchup_threshold
+        self._clock_resync_tolerance_seconds = clock_resync_tolerance_seconds
+        self._fast_forward_accept_tolerance_seconds = (
+            fast_forward_accept_tolerance_seconds
+        )
+        self._fast_forward_confidence_floor = fast_forward_confidence_floor
+        self._reacquire_consistency_tolerance_seconds = (
+            reacquire_consistency_tolerance_seconds
+        )
+        self._reacquire_min_consecutive_matches = reacquire_min_consecutive_matches
+        self._reacquire_min_duration_seconds = reacquire_min_duration_seconds
         self._emit_diagnostic_logs = emit_diagnostic_logs
         self._emit_match_debug_logs = emit_match_debug_logs
         self._metrics = RuntimeMetrics()
@@ -281,8 +323,28 @@ class AudioIngestionRuntime:
         self._consecutive_non_voiced_chunks = 0
         self._last_match: MatchResult | None = None
         self._last_slide_command: SlideCommand | None = None
+        self._timeline_mode = "SEARCHING"
+        self._timeline_anchor_reference_timestamp: float | None = None
+        self._timeline_anchor_observed_at: float | None = None
+        self._timeline_anchor_confidence: float = 0.0
+        self._timeline_anchor_reference_frame: int | None = None
+        self._timeline_anchor_raw_distance: float = 0.0
+        self._timeline_anchor_normalized_distance: float = 0.0
+        self._timeline_rate_estimate = 1.0
+        self._reacquire_candidate_timestamp: float | None = None
+        self._reacquire_candidate_observed_at: float | None = None
+        self._reacquire_start_observed_at: float | None = None
+        self._reacquire_streak = 0
         self._alignment_hold_active = False
         self._alignment_hold_reason: str | None = None
+        self._manual_jump_display_active = False
+        self._manual_timeline_anchor_active = False
+        self._timing_only_hold_elapsed_seconds = 0.0
+        self._last_auto_emitted_slide_number: int | None = None
+        self._last_auto_emitted_at: float | None = None
+        self._last_queue_catchup_drop_count = 0
+        self._last_queue_catchup_at: float | None = None
+        self._last_producer_drop_at: float | None = None
 
     def run(self) -> RuntimeReport:
         producer = Thread(target=self._produce, name="audio-producer", daemon=True)
@@ -293,7 +355,15 @@ class AudioIngestionRuntime:
         next_report_at = monotonic() + self._diagnostics_interval_seconds
         try:
             while producer.is_alive() or self._queue.qsize() > 0:
-                chunk = self._queue.get(timeout=0.1)
+                if self._queue.qsize() >= self._queue_catchup_threshold:
+                    chunk, dropped = self._queue.get_latest(timeout=0.1)
+                    if dropped:
+                        self._last_queue_catchup_drop_count = dropped
+                        self._last_queue_catchup_at = monotonic()
+                        with self._metrics_lock:
+                            self._metrics.chunks_dropped += dropped
+                else:
+                    chunk = self._queue.get(timeout=0.1)
                 if chunk is not None:
                     self._process(chunk)
 
@@ -320,6 +390,7 @@ class AudioIngestionRuntime:
             tracking_state=snapshot.tracking_state,
             last_match=snapshot.last_match,
             last_slide_command=snapshot.last_slide_command,
+            matched_slide_command=snapshot.matched_slide_command,
             current_section_key=snapshot.current_section_key,
             current_section_label=snapshot.current_section_label,
             current_section_slide_number=snapshot.current_section_slide_number,
@@ -340,6 +411,11 @@ class AudioIngestionRuntime:
             stop_method()
 
     def emit_operator_slide_command(self, command: SlideCommand) -> None:
+        self._log_slide_command_decision(
+            source="manual",
+            command=command,
+            match_result=self._last_match,
+        )
         self._last_slide_command = command
         if self._presentation_gateway is None:
             with self._metrics_lock:
@@ -389,23 +465,29 @@ class AudioIngestionRuntime:
         self,
         slide_number: int,
         *,
-        activate_manual_override: bool = True,
+        activate_manual_override: bool = False,
+        realign_tracker: bool = False,
+        record_correction: bool = False,
     ) -> SlideCommand:
         build_command = getattr(self._slide_resolver, "slide_command_for_slide", None)
         if not callable(build_command):
             raise ValueError("slide resolver does not support operator slide jumps")
-        seek_to_slide = getattr(self._slide_resolver, "seek_to_slide", None)
-        if not callable(seek_to_slide):
-            raise ValueError("slide resolver does not support operator seeking")
 
         command = build_command(slide_number, confidence=1.0)
         if activate_manual_override:
             self._manual_override_controller.activate()
-        seek_to_slide(slide_number)
-        self.force_match_anchor(command.reference_timestamp)
+        if realign_tracker:
+            seek_to_slide = getattr(self._slide_resolver, "seek_to_slide", None)
+            if not callable(seek_to_slide):
+                raise ValueError("slide resolver does not support operator seeking")
+            seek_to_slide(slide_number)
+            self.force_match_anchor(command.reference_timestamp)
+            self._manual_timeline_anchor_active = True
         self._alignment_hold_active = False
         self._alignment_hold_reason = None
-        self._record_operator_correction(command)
+        if record_correction:
+            self._record_operator_correction(command)
+        self._manual_jump_display_active = True
         self.emit_operator_slide_command(command)
         return command
 
@@ -422,6 +504,7 @@ class AudioIngestionRuntime:
                     self._metrics.chunks_received += 1
                     if dropped:
                         self._metrics.chunks_dropped += 1
+                        self._last_producer_drop_at = monotonic()
                     self._metrics.queue_high_water_mark = max(
                         self._metrics.queue_high_water_mark,
                         self._queue.qsize(),
@@ -444,6 +527,12 @@ class AudioIngestionRuntime:
             if self._consecutive_silent_chunks < self._silence_reset_chunk_count:
                 self._hold_timeline_during_silence(chunk)
                 return
+            if self._manual_timeline_anchor_active:
+                self._alignment_hold_active = True
+                self._alignment_hold_reason = "manual_anchor_timing"
+                if not self._hold_timeline_during_silence(chunk):
+                    self._reset_matching_due_to_silence()
+                return
             if self._consecutive_silent_chunks >= self._silence_reset_chunk_count:
                 self._reset_matching_due_to_silence()
             return
@@ -458,10 +547,16 @@ class AudioIngestionRuntime:
                 self._record_feature_frames(frames, allow_matching=False)
                 if self._consecutive_non_voiced_chunks < self._silence_reset_chunk_count:
                     self._hold_timeline_during_silence(chunk)
+                elif self._manual_timeline_anchor_active:
+                    self._alignment_hold_active = True
+                    self._alignment_hold_reason = "manual_anchor_timing"
+                    if not self._hold_timeline_during_silence(chunk):
+                        self._reset_matching_due_to_silence()
                 else:
                     self._reset_matching_due_to_silence()
                 return
             self._consecutive_non_voiced_chunks = 0
+            self._timing_only_hold_elapsed_seconds = 0.0
             self._record_feature_frames(frames, allow_matching=True)
 
     def _record_operator_correction(self, command: SlideCommand) -> None:
@@ -563,14 +658,25 @@ class AudioIngestionRuntime:
                 continue
             valid_frames += 1
             if allow_matching and self._feature_matcher is not None:
-                self._record_match(self._feature_matcher.match(frame))
+                self._record_match(self._feature_matcher.match(frame), frame=frame)
 
         with self._metrics_lock:
             self._metrics.feature_frames_processed += valid_frames
             self._metrics.invalid_inference_outputs += invalid_frames
 
-    def _record_match(self, result: MatchResult) -> None:
-        self._apply_match_result(result, count_metrics=True)
+    def _record_match(self, result: MatchResult, *, frame: FeatureFrame) -> None:
+        with self._metrics_lock:
+            if result.valid:
+                self._metrics.accepted_matches += 1
+            else:
+                self._metrics.low_confidence_matches += 1
+        applied_result = self._select_runtime_result(result, frame=frame)
+        self._log_match_acceptance(
+            candidate=result,
+            applied_result=applied_result,
+            frame=frame,
+        )
+        self._apply_match_result(applied_result, count_metrics=False)
 
     def _apply_match_result(
         self,
@@ -588,17 +694,36 @@ class AudioIngestionRuntime:
                     self._metrics.accepted_matches += 1
                 else:
                     self._metrics.low_confidence_matches += 1
+        if self._restore_from_manual_jump_if_needed(result):
+            return
+        tracking_state = self._tracking_state()
+        if tracking_state in {"SEARCHING", "UNINITIALIZED", "UNCERTAIN"}:
+            return
         if self._slide_resolver is not None:
             command = self._slide_resolver.resolve(result)
             if command is not None:
+                self._manual_jump_display_active = False
+                self._log_slide_command_decision(
+                    source="auto",
+                    command=command,
+                    match_result=result,
+                )
                 self._emit_slide_command(command)
 
-    def _hold_timeline_during_silence(self, chunk: AudioChunk) -> None:
+    def _hold_timeline_during_silence(self, chunk: AudioChunk) -> bool:
         if self._last_match is None or not self._last_match.valid:
-            return
+            return False
         chunk_duration_seconds = float(chunk.samples.size) if chunk.samples.size else 0.0
         if chunk_duration_seconds <= 0.0:
-            return
+            return False
+        if (
+            self._timing_only_hold_elapsed_seconds + chunk_duration_seconds / float(self._audio_sample_rate_hz)
+            > self._timeline_hold_max_seconds
+        ):
+            return False
+        self._timing_only_hold_elapsed_seconds += (
+            chunk_duration_seconds / float(self._audio_sample_rate_hz)
+        )
         held_result = MatchResult(
             reference_frame=self._last_match.reference_frame,
             reference_timestamp=(
@@ -611,6 +736,92 @@ class AudioIngestionRuntime:
             valid=True,
         )
         self._apply_match_result(held_result, count_metrics=False)
+        return True
+
+    def _restore_from_manual_jump_if_needed(self, result: MatchResult) -> bool:
+        if not result.valid or not self._manual_jump_display_active or self._slide_resolver is None:
+            return False
+        build_command = getattr(
+            self._slide_resolver,
+            "active_slide_command_for_timestamp",
+            None,
+        )
+        if not callable(build_command):
+            return False
+        command = build_command(result.reference_timestamp, confidence=result.confidence)
+        if command is None:
+            return False
+        if (
+            self._last_slide_command is not None
+            and command.slide_number == self._last_slide_command.slide_number
+            and abs(command.reference_timestamp - self._last_slide_command.reference_timestamp)
+            < 1e-6
+        ):
+            self._manual_jump_display_active = False
+            return False
+        self._manual_jump_display_active = False
+        self._log_slide_command_decision(
+            source="restore",
+            command=command,
+            match_result=result,
+        )
+        self._emit_slide_command(command)
+        return True
+
+    def _log_slide_command_decision(
+        self,
+        *,
+        source: str,
+        command: SlideCommand,
+        match_result: MatchResult | None,
+    ) -> None:
+        resolver_state = self._slide_resolver_debug_state()
+        self._logger.info(
+            "SLIDE_DECISION source=%s command_slide=%s command_timestamp=%.2f "
+            "tracking_state=%s match_timestamp=%s match_confidence=%s match_valid=%s "
+            "last_slide=%s manual_display_active=%s resolver=%s",
+            source,
+            command.slide_number,
+            command.reference_timestamp,
+            self._tracking_state() or "none",
+            (
+                f"{match_result.reference_timestamp:.2f}"
+                if match_result is not None
+                else "none"
+            ),
+            (
+                f"{match_result.confidence:.2f}"
+                if match_result is not None
+                else "none"
+            ),
+            (
+                match_result.valid
+                if match_result is not None
+                else "none"
+            ),
+            (
+                self._last_slide_command.slide_number
+                if self._last_slide_command is not None
+                else "none"
+            ),
+            self._manual_jump_display_active,
+            resolver_state,
+        )
+
+    def _slide_resolver_debug_state(self) -> str:
+        if self._slide_resolver is None:
+            return "none"
+        parts: list[str] = [type(self._slide_resolver).__name__]
+        for name in (
+            "_next_index",
+            "_candidate_count",
+            "_last_candidate_slide_number",
+            "_last_emitted_slide_number",
+            "_last_emitted_reference_timestamp",
+        ):
+            if hasattr(self._slide_resolver, name):
+                parts.append(f"{name[1:]}={getattr(self._slide_resolver, name)!r}")
+        return " ".join(parts)
 
     def _frames_include_voiced_pitch(self, frames: list[FeatureFrame]) -> bool:
         for frame in frames:
@@ -657,15 +868,307 @@ class AudioIngestionRuntime:
             ),
         )
 
+    def _log_match_acceptance(
+        self,
+        *,
+        candidate: MatchResult,
+        applied_result: MatchResult,
+        frame: FeatureFrame,
+    ) -> None:
+        if self._feature_matcher is None:
+            return
+        decision = getattr(self._feature_matcher, "last_decision", None)
+        if decision is None or not getattr(decision, "accepted", False):
+            return
+        predicted_result = self._predict_match_from_anchor(frame)
+        queue_catchup_age = (
+            None
+            if self._last_queue_catchup_at is None
+            else max(0.0, monotonic() - self._last_queue_catchup_at)
+        )
+        producer_drop_age = (
+            None
+            if self._last_producer_drop_at is None
+            else max(0.0, monotonic() - self._last_producer_drop_at)
+        )
+        self._logger.info(
+            "MATCH_ACCEPT reason=%s prev_state=%s state=%s frame_observed_at=%.3f "
+            "candidate_timestamp=%.2f candidate_confidence=%.2f candidate_valid=%s "
+            "applied_timestamp=%.2f applied_confidence=%.2f applied_valid=%s "
+            "delta_from_last_accepted=%s timeline_mode=%s "
+            "anchor_timestamp=%s anchor_confidence=%.2f predicted_timestamp=%s "
+            "anchor_observed_at=%s queue_size=%s catchup_drop_count=%s catchup_age=%s "
+            "producer_drop_age=%s matcher_reason=%s matcher_second_gap=%s matcher_second_time_gap=%s",
+            decision.reason,
+            decision.previous_state,
+            decision.state,
+            frame.observed_at,
+            candidate.reference_timestamp,
+            candidate.confidence,
+            candidate.valid,
+            applied_result.reference_timestamp,
+            applied_result.confidence,
+            applied_result.valid,
+            (
+                decision.delta_from_last_accepted
+                if decision.delta_from_last_accepted is not None
+                else "none"
+            ),
+            self._timeline_mode,
+            (
+                f"{self._timeline_anchor_reference_timestamp:.2f}"
+                if self._timeline_anchor_reference_timestamp is not None
+                else "none"
+            ),
+            self._timeline_anchor_confidence,
+            (
+                f"{predicted_result.reference_timestamp:.2f}"
+                if predicted_result is not None
+                else "none"
+            ),
+            (
+                f"{self._timeline_anchor_observed_at:.3f}"
+                if self._timeline_anchor_observed_at is not None
+                else "none"
+            ),
+            self._queue.qsize(),
+            self._last_queue_catchup_drop_count,
+            (
+                f"{queue_catchup_age:.3f}"
+                if queue_catchup_age is not None
+                else "none"
+            ),
+            (
+                f"{producer_drop_age:.3f}"
+                if producer_drop_age is not None
+                else "none"
+            ),
+            decision.matcher_reason or "none",
+            (
+                f"{decision.matcher_second_distance_gap:.4f}"
+                if decision.matcher_second_distance_gap is not None
+                else "none"
+            ),
+            (
+                f"{decision.matcher_second_time_gap_seconds:.2f}"
+                if decision.matcher_second_time_gap_seconds is not None
+                else "none"
+            ),
+        )
+
     def _reset_matching_due_to_silence(self) -> None:
         reset_method = getattr(self._feature_matcher, "reset", None)
         if callable(reset_method):
             reset_method()
         self._last_match = None
+        self._timeline_mode = "SEARCHING"
+        self._timeline_anchor_reference_timestamp = None
+        self._timeline_anchor_observed_at = None
+        self._timeline_anchor_confidence = 0.0
+        self._timeline_anchor_reference_frame = None
+        self._timeline_anchor_raw_distance = 0.0
+        self._timeline_anchor_normalized_distance = 0.0
+        self._timeline_rate_estimate = 1.0
+        self._reset_reacquire_candidate()
+        self._manual_timeline_anchor_active = False
+        self._timing_only_hold_elapsed_seconds = 0.0
         self._alignment_hold_active = True
         self._alignment_hold_reason = "silence"
 
+    def _update_timeline_anchor(
+        self,
+        result: MatchResult,
+        *,
+        observed_at: float,
+    ) -> None:
+        self._update_timeline_rate_estimate(
+            observed_at=observed_at,
+            reference_timestamp=result.reference_timestamp,
+        )
+        self._timeline_anchor_reference_timestamp = result.reference_timestamp
+        self._timeline_anchor_observed_at = observed_at
+        self._timeline_anchor_confidence = result.confidence
+        self._timeline_anchor_reference_frame = result.reference_frame
+        self._timeline_anchor_raw_distance = result.raw_distance
+        self._timeline_anchor_normalized_distance = result.normalized_distance
+        self._timing_only_hold_elapsed_seconds = 0.0
+        self._timeline_mode = "LOCKED_CLOCK"
+        self._reset_reacquire_candidate()
+
+    def _update_timeline_rate_estimate(
+        self,
+        *,
+        observed_at: float,
+        reference_timestamp: float,
+    ) -> None:
+        if (
+            self._timeline_anchor_reference_timestamp is None
+            or self._timeline_anchor_observed_at is None
+        ):
+            self._timeline_rate_estimate = 1.0
+            return
+        observed_delta = observed_at - self._timeline_anchor_observed_at
+        if observed_delta < 0.1:
+            return
+        reference_delta = reference_timestamp - self._timeline_anchor_reference_timestamp
+        instantaneous_rate = reference_delta / observed_delta
+        if not np.isfinite(instantaneous_rate):
+            return
+        instantaneous_rate = min(max(instantaneous_rate, 0.9), 1.1)
+        self._timeline_rate_estimate = (
+            (self._timeline_rate_estimate * 0.8) + (instantaneous_rate * 0.2)
+        )
+
+    def _reset_reacquire_candidate(self) -> None:
+        self._reacquire_candidate_timestamp = None
+        self._reacquire_candidate_observed_at = None
+        self._reacquire_start_observed_at = None
+        self._reacquire_streak = 0
+
+    def _anchor_age_seconds(self, observed_at: float) -> float | None:
+        if self._timeline_anchor_observed_at is None:
+            return None
+        return max(0.0, observed_at - self._timeline_anchor_observed_at)
+
+    def _select_runtime_result(
+        self,
+        result: MatchResult,
+        *,
+        frame: FeatureFrame,
+    ) -> MatchResult:
+        if result.valid:
+            return self._select_runtime_valid_result(result, frame=frame)
+        return self._select_runtime_invalid_result(result, frame=frame)
+
+    def _select_runtime_valid_result(
+        self,
+        result: MatchResult,
+        *,
+        frame: FeatureFrame,
+    ) -> MatchResult:
+        if self._timeline_anchor_reference_timestamp is None or self._timeline_mode == "SEARCHING":
+            self._update_timeline_anchor(result, observed_at=frame.observed_at)
+            return result
+
+        predicted_result = self._predict_match_from_anchor(frame)
+        if predicted_result is None:
+            self._update_timeline_anchor(result, observed_at=frame.observed_at)
+            return result
+
+        if (
+            abs(result.reference_timestamp - predicted_result.reference_timestamp)
+            <= self._clock_resync_tolerance_seconds
+        ):
+            self._update_timeline_anchor(result, observed_at=frame.observed_at)
+            return result
+
+        forward_delta = result.reference_timestamp - predicted_result.reference_timestamp
+        required_confidence = max(
+            self._fast_forward_confidence_floor,
+            self._timeline_anchor_confidence - 0.1,
+        )
+        if (
+            forward_delta > 0.0
+            and forward_delta <= self._fast_forward_accept_tolerance_seconds
+            and result.confidence >= required_confidence
+        ):
+            self._update_timeline_anchor(result, observed_at=frame.observed_at)
+            return result
+
+        if self._reacquire_candidate_confirmed(result, observed_at=frame.observed_at):
+            self._update_timeline_anchor(result, observed_at=frame.observed_at)
+            return result
+
+        anchor_age = self._anchor_age_seconds(frame.observed_at)
+        if anchor_age is not None and anchor_age <= self._timeline_hold_max_seconds:
+            self._timeline_mode = "SOFT_HOLD"
+            return predicted_result
+
+        self._timeline_mode = "REACQUIRE"
+        return self._invalidate(result)
+
+    def _select_runtime_invalid_result(
+        self,
+        result: MatchResult,
+        *,
+        frame: FeatureFrame,
+    ) -> MatchResult:
+        predicted_result = self._predict_match_from_anchor(frame)
+        anchor_age = self._anchor_age_seconds(frame.observed_at)
+        if (
+            predicted_result is not None
+            and anchor_age is not None
+            and anchor_age <= self._timeline_hold_max_seconds
+        ):
+            self._timeline_mode = "SOFT_HOLD"
+            return predicted_result
+        self._timeline_mode = "REACQUIRE"
+        self._reset_reacquire_candidate()
+        return result
+
+    def _reacquire_candidate_confirmed(
+        self,
+        result: MatchResult,
+        *,
+        observed_at: float,
+    ) -> bool:
+        if self._timeline_mode not in {"REACQUIRE", "SOFT_HOLD", "LOCKED_CLOCK"}:
+            return False
+        if (
+            self._reacquire_candidate_timestamp is not None
+            and abs(result.reference_timestamp - self._reacquire_candidate_timestamp)
+            <= self._reacquire_consistency_tolerance_seconds
+        ):
+            self._reacquire_streak += 1
+        else:
+            self._reacquire_streak = 1
+            self._reacquire_start_observed_at = observed_at
+        if self._reacquire_start_observed_at is None:
+            self._reacquire_start_observed_at = observed_at
+        self._reacquire_candidate_timestamp = result.reference_timestamp
+        self._reacquire_candidate_observed_at = observed_at
+        reacquire_duration = observed_at - self._reacquire_start_observed_at
+        if self._reacquire_streak < self._reacquire_min_consecutive_matches:
+            self._timeline_mode = "REACQUIRE"
+            return False
+        if reacquire_duration < self._reacquire_min_duration_seconds:
+            self._timeline_mode = "REACQUIRE"
+            return False
+        self._timeline_mode = "REACQUIRE"
+        return True
+
+    def _predict_match_from_anchor(self, frame: FeatureFrame) -> MatchResult | None:
+        if (
+            self._timeline_anchor_reference_timestamp is None
+            or self._timeline_anchor_observed_at is None
+            or self._timeline_anchor_reference_frame is None
+        ):
+            return None
+        elapsed_seconds = frame.observed_at - self._timeline_anchor_observed_at
+        if elapsed_seconds <= 0 or elapsed_seconds > self._timeline_hold_max_seconds:
+            return None
+        return MatchResult(
+            reference_frame=self._timeline_anchor_reference_frame,
+            reference_timestamp=(
+                self._timeline_anchor_reference_timestamp
+                + (elapsed_seconds * self._timeline_rate_estimate)
+            ),
+            raw_distance=self._timeline_anchor_raw_distance,
+            normalized_distance=self._timeline_anchor_normalized_distance,
+            confidence=self._timeline_anchor_confidence,
+            valid=True,
+        )
+
     def _emit_slide_command(self, command: SlideCommand) -> None:
+        now = monotonic()
+        if (
+            self._last_auto_emitted_slide_number == command.slide_number
+            and self._last_auto_emitted_at is not None
+            and now - self._last_auto_emitted_at < 2.0
+        ):
+            return
+        self._last_auto_emitted_slide_number = command.slide_number
+        self._last_auto_emitted_at = now
         self._last_slide_command = command
         self._publish_status()
         if self._manual_override_controller.is_active:
@@ -743,6 +1246,21 @@ class AudioIngestionRuntime:
                 queue_high_water_mark=self._metrics.queue_high_water_mark,
             )
 
+    def _matched_slide_command(self) -> SlideCommand | None:
+        if self._last_match is None or not self._last_match.valid or self._slide_resolver is None:
+            return None
+        build_command = getattr(
+            self._slide_resolver,
+            "active_slide_command_for_timestamp",
+            None,
+        )
+        if not callable(build_command):
+            return None
+        return build_command(
+            self._last_match.reference_timestamp,
+            confidence=self._last_match.confidence,
+        )
+
     def _build_status_snapshot(self) -> RuntimeStatusSnapshot:
         controller_status = getattr(self._slide_resolver, "status", None)
         return RuntimeStatusSnapshot(
@@ -758,6 +1276,7 @@ class AudioIngestionRuntime:
             tracking_state=self._tracking_state(),
             last_match=self._last_match,
             last_slide_command=self._last_slide_command,
+            matched_slide_command=self._matched_slide_command(),
             current_section_key=getattr(controller_status, "current_section_key", None),
             current_section_label=getattr(controller_status, "current_section_label", None),
             current_section_slide_number=getattr(

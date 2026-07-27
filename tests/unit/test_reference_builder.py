@@ -168,14 +168,22 @@ def test_builder_creates_reproducible_profile_files(tmp_path: Path) -> None:
     saved_profile = json.loads((output_path / "profile.json").read_text(encoding="utf-8"))
     saved_metadata = json.loads((output_path / "metadata.json").read_text(encoding="utf-8"))
     saved_features = np.load(output_path / "reference_features.npy")
+    saved_coarse_features = np.load(output_path / "coarse_signatures.npy")
+    saved_coarse_timestamps = np.load(output_path / "coarse_timestamps.npy")
+    saved_coarse_frame_indexes = np.load(output_path / "coarse_frame_indexes.npy")
 
     assert saved_profile["profile_version"] == PROFILE_VERSION
     assert saved_profile["name"] == "amazing-grace"
+    assert saved_profile["coarse_window_count"] > 0
     assert saved_profile["slides"][0]["slide_number"] == 1
     assert saved_metadata["profile_version"] == PROFILE_VERSION
     assert saved_metadata["reference_audio_role"] == "mixed"
     assert saved_features.dtype == np.float32
     assert saved_features.shape[1] == 4
+    assert saved_coarse_features.dtype == np.float32
+    assert saved_coarse_features.shape[0] == saved_profile["coarse_window_count"]
+    assert saved_coarse_timestamps.shape[0] == saved_profile["coarse_window_count"]
+    assert saved_coarse_frame_indexes.shape[0] == saved_profile["coarse_window_count"]
 
 
 def test_builder_records_vocal_reference_metadata(tmp_path: Path) -> None:

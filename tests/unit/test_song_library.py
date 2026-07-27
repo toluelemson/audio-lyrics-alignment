@@ -33,6 +33,19 @@ def test_song_library_creates_song_assets_and_index(tmp_path: Path) -> None:
     assert library.list_songs()[0].title == "Amazing Grace"
 
 
+def test_song_library_can_create_title_only_song(tmp_path: Path) -> None:
+    library = SongLibrary(str(tmp_path / "library"))
+
+    record = library.create_song(title="Untitled Capture")
+
+    assert record.song_id == "untitled-capture"
+    assert library.audio_path(record.song_id) is None
+    assert library.reference_audio_path(record.song_id) is None
+    assert library.lyrics_text(record.song_id) == ""
+    slides = json.loads(library.slides_path(record.song_id).read_text(encoding="utf-8"))
+    assert slides == []
+
+
 def test_song_library_adds_default_section_when_lyrics_have_no_headings(tmp_path: Path) -> None:
     library = SongLibrary(str(tmp_path / "library"))
 
@@ -303,6 +316,56 @@ def test_song_library_edit_lyrics_regenerates_slides_and_clears_timing_state(tmp
     assert library.get_song(record.song_id).profile_directory == ""
     slides = json.loads(library.slides_path(record.song_id).read_text(encoding="utf-8"))
     assert slides[0]["lyrics"] == "New line one\nNew line two"
+
+
+def test_song_library_can_replace_slides_and_clear_profile_state(tmp_path: Path) -> None:
+    library = SongLibrary(str(tmp_path / "library"))
+    record = library.create_song(
+        title="Smooth Criminal",
+        lyrics_text="Verse 1\nLine one\nLine two\nLine three",
+        audio_filename="smooth.wav",
+        audio_bytes=b"RIFFdemo",
+    )
+    library.update_profile_directory(record.song_id)
+    profile_path = library.profile_path(record.song_id)
+    profile_path.mkdir(parents=True, exist_ok=True)
+
+    updated = library.replace_slides(
+        record.song_id,
+        [
+            {"slide_number": 1, "section": "Verse 1", "lyrics": "Line one\nLine two"},
+            {"slide_number": 2, "section": "Verse 1", "lyrics": "Line three"},
+        ],
+    )
+
+    slides = json.loads(library.slides_path(record.song_id).read_text(encoding="utf-8"))
+    assert updated.profile_directory == ""
+    assert slides[1]["slide_number"] == 2
+    assert slides[1]["lyrics"] == "Line three"
+    assert not profile_path.exists()
+
+
+def test_song_library_can_replace_slides_with_one_line_per_slide(tmp_path: Path) -> None:
+    library = SongLibrary(str(tmp_path / "library"))
+    record = library.create_song(
+        title="Line By Line",
+        lyrics_text="Verse 1\nLine one\nLine two\nLine three",
+        audio_filename="line.wav",
+        audio_bytes=b"RIFFdemo",
+    )
+
+    library.replace_slides(
+        record.song_id,
+        [
+            {"slide_number": 1, "section": "Verse 1", "lyrics": "Line one"},
+            {"slide_number": 2, "section": "Verse 1", "lyrics": "Line two"},
+            {"slide_number": 3, "section": "Verse 1", "lyrics": "Line three"},
+        ],
+    )
+
+    slides = json.loads(library.slides_path(record.song_id).read_text(encoding="utf-8"))
+    assert [entry["slide_number"] for entry in slides] == [1, 2, 3]
+    assert [entry["lyrics"] for entry in slides] == ["Line one", "Line two", "Line three"]
 
 
 def test_song_library_can_delete_song_and_remove_assets(tmp_path: Path) -> None:

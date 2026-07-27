@@ -32,6 +32,9 @@ class BuiltReferenceProfile:
     frame_duration_seconds: float
     timestamps_seconds: tuple[float, ...]
     feature_matrix: np.ndarray
+    coarse_feature_matrix: np.ndarray
+    coarse_timestamps_seconds: tuple[float, ...]
+    coarse_frame_indexes: tuple[int, ...]
     slides: tuple[SlideInterval, ...]
     metadata: dict[str, str]
 
@@ -93,6 +96,11 @@ class ReferenceProfileBuilder:
             axis=0,
         )
         timestamps_seconds = tuple(float(frame.observed_at) for frame in frames)
+        (
+            coarse_feature_matrix,
+            coarse_timestamps_seconds,
+            coarse_frame_indexes,
+        ) = build_coarse_reference_signatures(feature_matrix, timestamps_seconds)
         frame_duration_seconds = float(frames[0].frame_duration_seconds)
         total_duration_seconds = len(samples) / self._config.sample_rate
         slides = load_slide_intervals(
@@ -122,6 +130,9 @@ class ReferenceProfileBuilder:
             frame_duration_seconds=frame_duration_seconds,
             timestamps_seconds=timestamps_seconds,
             feature_matrix=feature_matrix,
+            coarse_feature_matrix=coarse_feature_matrix,
+            coarse_timestamps_seconds=coarse_timestamps_seconds,
+            coarse_frame_indexes=coarse_frame_indexes,
             slides=slides,
             metadata=metadata,
         )
@@ -131,6 +142,15 @@ class ReferenceProfileBuilder:
         target.mkdir(parents=True, exist_ok=True)
 
         np.save(target / "reference_features.npy", profile.feature_matrix)
+        np.save(target / "coarse_signatures.npy", profile.coarse_feature_matrix)
+        np.save(
+            target / "coarse_timestamps.npy",
+            np.asarray(profile.coarse_timestamps_seconds, dtype=np.float32),
+        )
+        np.save(
+            target / "coarse_frame_indexes.npy",
+            np.asarray(profile.coarse_frame_indexes, dtype=np.int32),
+        )
         (target / "metadata.json").write_text(
             json.dumps(profile.metadata, indent=2, sort_keys=True),
             encoding="utf-8",
@@ -154,6 +174,7 @@ class ReferenceProfileBuilder:
                     "name": profile.name,
                     "frame_duration_seconds": profile.frame_duration_seconds,
                     "timestamps_seconds": list(profile.timestamps_seconds),
+                    "coarse_window_count": int(profile.coarse_feature_matrix.shape[0]),
                     "slides": slides,
                 },
                 indent=2,
@@ -226,6 +247,54 @@ def extract_reference_frames(
         )
         frames.extend(feature_extractor.extract(chunk))
     return frames
+
+
+def build_coarse_reference_signatures(
+    feature_matrix: np.ndarray,
+    timestamps_seconds: tuple[float, ...],
+    *,
+    window_frames: int = 24,
+    stride_frames: int = 6,
+) -> tuple[np.ndarray, tuple[float, ...], tuple[int, ...]]:
+    matrix = np.asarray(feature_matrix, dtype=np.float32)
+    if matrix.ndim != 2 or matrix.shape[0] == 0:
+        raise ValueError("feature_matrix must be a non-empty 2D matrix")
+    if len(timestamps_seconds) != matrix.shape[0]:
+        raise ValueError("timestamps_seconds must align with feature rows")
+
+    normalized_rows = np.stack([_normalize_row(row) for row in matrix], axis=0)
+    signatures: list[np.ndarray] = []
+    signature_timestamps: list[float] = []
+    signature_frames: list[int] = []
+    if matrix.shape[0] < window_frames:
+        signature = _normalize_row(np.mean(normalized_rows, axis=0, dtype=np.float32))
+        center_index = matrix.shape[0] // 2
+        signatures.append(signature)
+        signature_timestamps.append(float(timestamps_seconds[center_index]))
+        signature_frames.append(center_index)
+    else:
+        for start in range(0, matrix.shape[0] - window_frames + 1, stride_frames):
+            end = start + window_frames
+            signature = _normalize_row(
+                np.mean(normalized_rows[start:end], axis=0, dtype=np.float32)
+            )
+            center_index = start + (window_frames // 2)
+            signatures.append(signature)
+            signature_timestamps.append(float(timestamps_seconds[center_index]))
+            signature_frames.append(center_index)
+    return (
+        np.stack(signatures, axis=0),
+        tuple(signature_timestamps),
+        tuple(signature_frames),
+    )
+
+
+def _normalize_row(values: np.ndarray) -> np.ndarray:
+    vector = np.asarray(values, dtype=np.float32)
+    norm = float(np.linalg.norm(vector))
+    if norm <= 1e-6:
+        return np.zeros_like(vector)
+    return vector / norm
 
 
 def load_slide_intervals(

@@ -141,6 +141,28 @@ class TimelineSlideResolver:
             for cue in self._slide_groups
         )
 
+    def active_slide_command_for_timestamp(
+        self,
+        reference_timestamp: float,
+        *,
+        confidence: float = 1.0,
+    ) -> SlideCommand | None:
+        if not self._slide_groups:
+            return None
+        target = reference_timestamp + self._config.lookahead_seconds
+        active_cue = self._slide_groups[0]
+        for cue in self._slide_groups:
+            if cue.reference_timestamp > target:
+                break
+            active_cue = cue
+        return SlideCommand(
+            slide_number=active_cue.slide_number,
+            section=active_cue.section,
+            lyrics=active_cue.lyrics,
+            reference_timestamp=active_cue.reference_timestamp,
+            confidence=confidence,
+        )
+
     def _skip_stale_cues(self, reference_timestamp: float) -> None:
         while self._next_index < len(self._slide_groups):
             cue = self._slide_groups[self._next_index]

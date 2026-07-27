@@ -1,4 +1,5 @@
 import numpy as np
+from types import SimpleNamespace
 
 from lyrics_aligner.adapters.matching import (
     TrackingFeatureMatcher,
@@ -17,6 +18,34 @@ class SequenceMatcher:
         del frame
         result = self._results[self._index]
         self._index += 1
+        return result
+
+
+class AmbiguousSequenceMatcher:
+    def __init__(
+        self,
+        results: list[MatchResult],
+        *,
+        second_distance_gap: float,
+        second_time_gap_seconds: float,
+        reason: str = "accepted",
+    ) -> None:
+        self._results = results
+        self._index = 0
+        self._second_distance_gap = second_distance_gap
+        self._second_time_gap_seconds = second_time_gap_seconds
+        self._reason = reason
+        self.last_decision = None
+
+    def match(self, frame: FeatureFrame) -> MatchResult:
+        del frame
+        result = self._results[self._index]
+        self._index += 1
+        self.last_decision = SimpleNamespace(
+            reason=self._reason,
+            second_distance_gap=self._second_distance_gap,
+            second_time_gap_seconds=self._second_time_gap_seconds,
+        )
         return result
 
 
@@ -316,7 +345,7 @@ def test_tracker_prefers_anchored_timeline_over_distant_live_match() -> None:
 
     assert anchored.valid is True
     assert anchored.reference_timestamp == 10.5
-    assert anchored.reference_frame == 42
+    assert anchored.reference_frame == 900
     assert tracker.last_decision is not None
     assert tracker.last_decision.reason == "tracking_guided_by_anchor"
     assert tracker.state_name == "TRACKING"
@@ -350,6 +379,224 @@ def test_tracker_accepts_live_match_when_it_stays_close_to_anchor_timeline() -> 
     assert accepted.reference_timestamp == 10.4
     assert tracker.last_decision is not None
     assert tracker.last_decision.reason == "tracking_accepted"
+
+
+def test_tracker_rejects_ambiguous_tracking_candidate() -> None:
+    matcher: FeatureMatcher = AmbiguousSequenceMatcher(
+        [_result(1), _result(2), _result(3)],
+        second_distance_gap=0.001,
+        second_time_gap_seconds=0.8,
+    )
+    tracker = TrackingFeatureMatcher(
+        matcher,
+        TrackingFeatureMatcherConfig(
+            search_min_consecutive_matches=2,
+            recovery_min_consecutive_matches=2,
+            search_min_duration_seconds=0.0,
+            recovery_min_duration_seconds=0.0,
+            tracking_confidence_threshold=0.7,
+            ambiguous_second_distance_gap_threshold=0.01,
+            ambiguous_second_time_gap_seconds=0.5,
+        ),
+    )
+
+    assert tracker.match(_frame(0.0)).valid is False
+    assert tracker.match(_frame(0.1)).valid is True
+    rejected = tracker.match(_frame(0.2))
+
+    assert rejected.valid is False
+    assert tracker.last_decision is not None
+    assert tracker.last_decision.reason == "tracking_rejected_ambiguous_candidate"
+    assert tracker.state_name == "UNCERTAIN"
+
+
+def test_tracker_does_not_anchor_guide_ambiguous_candidate() -> None:
+    matcher: FeatureMatcher = AmbiguousSequenceMatcher(
+        [
+            MatchResult(
+                reference_frame=900,
+                reference_timestamp=225.0,
+                raw_distance=0.1,
+                normalized_distance=0.1,
+                confidence=0.91,
+                valid=True,
+            )
+        ],
+        second_distance_gap=0.001,
+        second_time_gap_seconds=0.9,
+    )
+    tracker = TrackingFeatureMatcher(
+        matcher,
+        TrackingFeatureMatcherConfig(
+            anchored_timeline_tolerance_seconds=1.5,
+            max_forward_jump_seconds=0.5,
+            tracking_confidence_threshold=0.7,
+            ambiguous_second_distance_gap_threshold=0.01,
+            ambiguous_second_time_gap_seconds=0.5,
+        ),
+    )
+
+    tracker.force_anchor(10.0, observed_at=30.0)
+    rejected = tracker.match(_frame(30.5))
+
+    assert rejected.valid is False
+    assert tracker.last_decision is not None
+    assert tracker.last_decision.reason == "tracking_rejected_ambiguous_candidate"
+
+
+def test_tracker_does_not_anchor_guide_below_threshold_candidate() -> None:
+    matcher: FeatureMatcher = AmbiguousSequenceMatcher(
+        [
+            MatchResult(
+                reference_frame=900,
+                reference_timestamp=225.0,
+                raw_distance=0.1,
+                normalized_distance=0.1,
+                confidence=0.69,
+                valid=True,
+            )
+        ],
+        second_distance_gap=0.02,
+        second_time_gap_seconds=0.15,
+        reason="below_confidence_threshold",
+    )
+    tracker = TrackingFeatureMatcher(
+        matcher,
+        TrackingFeatureMatcherConfig(
+            anchored_timeline_tolerance_seconds=1.5,
+            max_forward_jump_seconds=0.5,
+            tracking_confidence_threshold=0.7,
+            recovery_confidence_threshold=0.7,
+            tracking_miss_patience=0,
+        ),
+    )
+
+    tracker.force_anchor(10.0, observed_at=30.0)
+    rejected = tracker.match(_frame(30.5))
+
+    assert rejected.valid is False
+    assert tracker.last_decision is not None
+    assert tracker.last_decision.reason == "tracking_rejected_low_confidence"
+
+
+def test_tracker_anchor_guidance_keeps_last_accepted_frame() -> None:
+    matcher: FeatureMatcher = SequenceMatcher(
+        [
+            MatchResult(
+                reference_frame=900,
+                reference_timestamp=225.0,
+                raw_distance=0.1,
+                normalized_distance=0.1,
+                confidence=0.91,
+                valid=True,
+            )
+        ]
+    )
+    tracker = TrackingFeatureMatcher(
+        matcher,
+        TrackingFeatureMatcherConfig(
+            anchored_timeline_tolerance_seconds=1.5,
+            max_forward_jump_seconds=0.5,
+        ),
+    )
+
+    tracker.force_anchor(10.0, observed_at=30.0)
+    tracker._last_accepted_frame = 40  # noqa: SLF001
+    anchored = tracker.match(_frame(30.5))
+
+    assert anchored.valid is True
+    assert anchored.reference_timestamp == 10.5
+    assert anchored.reference_frame == 40
+
+
+def test_tracker_manual_anchor_waits_for_reanchor_after_recovery_failure() -> None:
+    matcher: FeatureMatcher = SequenceMatcher(
+        [
+            MatchResult(
+                reference_frame=900,
+                reference_timestamp=225.0,
+                raw_distance=0.1,
+                normalized_distance=0.1,
+                confidence=0.91,
+                valid=True,
+            ),
+        ]
+    )
+    tracker = TrackingFeatureMatcher(
+        matcher,
+        TrackingFeatureMatcherConfig(
+            anchored_timeline_tolerance_seconds=0.0,
+            tracking_miss_patience=0,
+            lost_match_patience=1,
+            max_forward_jump_seconds=0.5,
+        ),
+    )
+
+    tracker.force_anchor(10.0, observed_at=30.0)
+    tracker._anchored_timeline_active = False  # noqa: SLF001
+    tracker._state = "UNCERTAIN"  # noqa: SLF001
+    rejected = tracker.match(_frame(30.5))
+
+    assert rejected.valid is False
+    assert tracker.last_decision is not None
+    assert tracker.last_decision.reason == "recovery_failed_waiting_for_manual_reanchor"
+    assert tracker.state_name == "UNCERTAIN"
+
+
+def test_tracker_manual_anchor_disables_global_reacquire() -> None:
+    matcher: FeatureMatcher = SequenceMatcher(
+        [
+            MatchResult(
+                reference_frame=900,
+                reference_timestamp=225.0,
+                raw_distance=0.1,
+                normalized_distance=0.1,
+                confidence=0.95,
+                valid=True,
+            ),
+            MatchResult(
+                reference_frame=901,
+                reference_timestamp=225.25,
+                raw_distance=0.1,
+                normalized_distance=0.1,
+                confidence=0.95,
+                valid=True,
+            ),
+            MatchResult(
+                reference_frame=902,
+                reference_timestamp=225.5,
+                raw_distance=0.1,
+                normalized_distance=0.1,
+                confidence=0.95,
+                valid=True,
+            ),
+        ]
+    )
+    tracker = TrackingFeatureMatcher(
+        matcher,
+        TrackingFeatureMatcherConfig(
+            anchored_timeline_tolerance_seconds=0.0,
+            tracking_miss_patience=0,
+            lost_match_patience=3,
+            recovery_min_consecutive_matches=2,
+            recovery_min_duration_seconds=0.0,
+            search_min_consecutive_matches=2,
+            search_min_duration_seconds=0.0,
+            max_forward_jump_seconds=0.5,
+        ),
+    )
+
+    tracker.force_anchor(10.0, observed_at=30.0)
+    tracker._anchored_timeline_active = False  # noqa: SLF001
+    tracker._state = "UNCERTAIN"  # noqa: SLF001
+    first = tracker.match(_frame(30.5))
+    second = tracker.match(_frame(31.0))
+
+    assert first.valid is False
+    assert second.valid is False
+    assert tracker.state_name == "UNCERTAIN"
+    assert tracker.last_decision is not None
+    assert tracker.last_decision.reason != "global_reacquire_accepted"
 
 
 def test_tracker_search_seeds_expected_origin_from_first_strong_candidate() -> None:

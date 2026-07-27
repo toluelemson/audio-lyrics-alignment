@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lyrics_aligner.adapters.audio import (
@@ -15,6 +18,9 @@ from lyrics_aligner.adapters.features import (
     OnnxFeatureExtractorConfig,
 )
 from lyrics_aligner.adapters.matching import (
+    CoarseAnchorFeatureMatcher,
+    CoarseFingerprintMatcher,
+    CoarseFingerprintMatcherConfig,
     RollingWindowFeatureMatcher,
     RollingWindowFeatureMatcherConfig,
     TrackingFeatureMatcher,
@@ -39,7 +45,7 @@ from lyrics_aligner.application.runtime import (
     RuntimeReport,
 )
 from lyrics_aligner.config import AppConfig
-from lyrics_aligner.domain.models import ReferenceProfile
+from lyrics_aligner.domain.models import ReferenceProfile, SlideCue
 from lyrics_aligner.ports.audio_source import AudioSource
 from lyrics_aligner.ports.feature_matcher import FeatureMatcher
 from lyrics_aligner.ports.presentation_gateway import PresentationGateway
@@ -47,6 +53,62 @@ from lyrics_aligner.ports.slide_resolver import SlideResolver
 
 if TYPE_CHECKING:
     from lyrics_aligner.application.runtime import RuntimeStatusObserver
+
+
+def _refresh_profile_slide_cues_from_saved_timings(profile: ReferenceProfile) -> ReferenceProfile:
+    slides_path = profile.metadata.get("slides_path")
+    if not slides_path:
+        return profile
+    path = Path(slides_path).expanduser().resolve()
+    if not path.exists():
+        return profile
+
+    try:
+        content = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return profile
+    if not isinstance(content, list):
+        return profile
+
+    slide_cues: list[SlideCue] = []
+    for entry in content:
+        if not isinstance(entry, dict):
+            continue
+        slide_number = entry.get("slide_number")
+        section = entry.get("section")
+        lyrics = entry.get("lyrics")
+        click_timestamp = entry.get("click_timestamp")
+        reference_timestamp = entry.get("reference_timestamp")
+        timestamp = None
+        if isinstance(click_timestamp, (int, float)) and click_timestamp >= 0:
+            timestamp = float(click_timestamp)
+        elif isinstance(reference_timestamp, (int, float)) and reference_timestamp >= 0:
+            timestamp = float(reference_timestamp)
+        if (
+            isinstance(slide_number, bool)
+            or not isinstance(slide_number, int)
+            or slide_number <= 0
+            or not isinstance(section, str)
+            or not section.strip()
+            or not isinstance(lyrics, str)
+            or not lyrics.strip()
+            or timestamp is None
+        ):
+            continue
+        slide_cues.append(
+            SlideCue(
+                slide_number=slide_number,
+                section=section.strip(),
+                lyrics=lyrics.strip(),
+                reference_timestamp=timestamp,
+            )
+        )
+    if not slide_cues:
+        return profile
+    return replace(
+        profile,
+        slide_cues=tuple(sorted(slide_cues, key=lambda cue: cue.reference_timestamp)),
+    )
 
 
 def _build_audio_source(config: AppConfig) -> AudioSource:
@@ -88,7 +150,7 @@ def _build_feature_matcher(
         ),
         correction_anchors=correction_anchors,
     )
-    return TrackingFeatureMatcher(
+    tracking_matcher = TrackingFeatureMatcher(
         matcher,
         TrackingFeatureMatcherConfig(
             search_min_consecutive_matches=config.match_confirmation_count,
@@ -110,6 +172,34 @@ def _build_feature_matcher(
             max_forward_jump_seconds=config.tracking_max_forward_jump_seconds,
             max_backward_jump_seconds=config.tracking_max_backward_jump_seconds,
             lost_match_patience=config.tracking_lost_match_patience,
+        ),
+    )
+    try:
+        coarse_matcher = CoarseFingerprintMatcher(
+            profile,
+            CoarseFingerprintMatcherConfig(
+                confidence_threshold=max(
+                    config.tracking_recovery_confidence_threshold,
+                    config.match_confidence_threshold,
+                ),
+                ambiguity_margin=max(0.015, config.match_ambiguity_distance_margin),
+                window_frames=24,
+                seed_cooldown_seconds=1.0,
+            ),
+        )
+    except (FileNotFoundError, ValueError):
+        return tracking_matcher
+    return CoarseAnchorFeatureMatcher(
+        tracking_matcher,
+        coarse_matcher,
+        CoarseFingerprintMatcherConfig(
+            confidence_threshold=max(
+                config.tracking_recovery_confidence_threshold,
+                config.match_confidence_threshold,
+            ),
+            ambiguity_margin=max(0.015, config.match_ambiguity_distance_margin),
+            window_frames=24,
+            seed_cooldown_seconds=1.0,
         ),
     )
 
@@ -209,6 +299,7 @@ def build_runtime(
     status_observer: RuntimeStatusObserver | None = None,
 ) -> AudioIngestionRuntime:
     profile = FilesystemReferenceProfileRepository().load(config.reference_profile_path)
+    profile = _refresh_profile_slide_cues_from_saved_timings(profile)
     logger.info(
         "Loaded reference profile name=%s frames=%s path=%s",
         profile.name,
