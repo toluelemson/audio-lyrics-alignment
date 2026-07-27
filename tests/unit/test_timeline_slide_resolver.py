@@ -218,3 +218,33 @@ def test_resolver_groups_consecutive_line_cues_into_single_slide_output() -> Non
     assert second is None
     assert third is not None
     assert third.slide_number == 2
+
+
+def test_resolver_can_emit_from_reference_clock_without_match_candidates() -> None:
+    profile = ReferenceProfile(
+        name="song-a",
+        frames=(),
+        metadata={},
+        slide_cues=(
+            SlideCue(1, "Verse 1", "Amazing grace", 0.5),
+            SlideCue(2, "Verse 2", "How sweet the sound", 1.2),
+        ),
+    )
+    resolver = TimelineSlideResolver(
+        profile,
+        TimelineSlideResolverConfig(
+            lookahead_seconds=0.0,
+            cooldown_seconds=0.0,
+            consecutive_match_count=2,
+        ),
+    )
+
+    first = resolver.advance_to_timestamp(0.49, confidence=0.9)
+    second = resolver.advance_to_timestamp(0.5, confidence=0.9)
+    third = resolver.advance_to_timestamp(1.25, confidence=0.8)
+
+    assert first is None
+    assert second is not None
+    assert second.slide_number == 1
+    assert third is not None
+    assert third.slide_number == 2

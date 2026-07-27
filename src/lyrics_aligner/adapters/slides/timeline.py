@@ -97,6 +97,48 @@ class TimelineSlideResolver:
             confidence=match.confidence,
         )
 
+    def advance_to_timestamp(
+        self,
+        reference_timestamp: float,
+        *,
+        confidence: float = 1.0,
+    ) -> SlideCommand | None:
+        if self._next_index >= len(self._slide_groups):
+            self._reset_candidate()
+            return None
+
+        self._skip_stale_cues(reference_timestamp)
+        if self._next_index >= len(self._slide_groups):
+            self._reset_candidate()
+            return None
+
+        cue = self._slide_groups[self._next_index]
+        if reference_timestamp + self._config.lookahead_seconds < cue.reference_timestamp:
+            return None
+
+        if (
+            self._last_emitted_reference_timestamp is not None
+            and reference_timestamp - self._last_emitted_reference_timestamp
+            < self._config.cooldown_seconds
+        ):
+            return None
+
+        if cue.slide_number == self._last_emitted_slide_number:
+            self._next_index += 1
+            return None
+
+        self._next_index += 1
+        self._last_emitted_slide_number = cue.slide_number
+        self._last_emitted_reference_timestamp = cue.reference_timestamp
+        self._reset_candidate()
+        return SlideCommand(
+            slide_number=cue.slide_number,
+            section=cue.section,
+            lyrics=cue.lyrics,
+            reference_timestamp=cue.reference_timestamp,
+            confidence=confidence,
+        )
+
     def seek_to_slide(self, slide_number: int) -> None:
         target_index = None
         for index, cue in enumerate(self._slide_groups):

@@ -2339,7 +2339,9 @@ LIVE_HTML = """<!doctype html>
       <section class="card">
         <div class="status">
           <div class="stat"><div class="label">Runtime</div><div class="value" id="runtimeState">stopped</div></div>
+          <div class="stat"><div class="label">Mode</div><div class="value" id="modeState">live</div></div>
           <div class="stat"><div class="label">Tracking</div><div class="value" id="trackingState">idle</div></div>
+          <div class="stat"><div class="label">Rate</div><div class="value" id="rateState">1.000x</div></div>
           <div class="stat"><div class="label">Position</div><div class="value" id="positionState">none</div></div>
           <div class="stat"><div class="label">Matched Line</div><div class="value" id="lineState">none</div></div>
           <div class="stat"><div class="label">Shown Line</div><div class="value" id="shownLineState">none</div></div>
@@ -2348,6 +2350,15 @@ LIVE_HTML = """<!doctype html>
           <div class="stat"><div class="label">Hold</div><div class="value" id="holdState">none</div></div>
         </div>
         <form id="startForm">
+          <div class="field">
+            <label for="runtimeMode">Run Mode</label>
+            <select id="runtimeMode" name="runtimeMode">
+              <option value="live_audio_inference" selected>Live Audio Inference</option>
+              <option value="timing_only">Timing Only</option>
+              <option value="capture_timings">Capture Timings</option>
+            </select>
+            <div class="caption" style="margin-top:6px">Use live inference for normal tracking. Switch to timing only when you want the current line anchor to drive the clock. Capture Timings opens the training page.</div>
+          </div>
         <div class="field">
           <label for="device">Input Device</label>
           <select id="device" name="device"></select>
@@ -2371,6 +2382,7 @@ LIVE_HTML = """<!doctype html>
           </div>
           <div class="buttons">
             <button class="primary" type="submit">Start Runtime</button>
+            <button class="secondary" type="button" id="applyModeButton">Apply Mode</button>
             <button class="danger" type="button" id="stopButton">Stop Runtime</button>
             <button class="secondary" type="button" id="refreshButton">Refresh Status</button>
           </div>
@@ -2402,7 +2414,9 @@ LIVE_HTML = """<!doctype html>
       pendingTargetSlideNumber: null,
     };
     const runtimeState = document.getElementById("runtimeState");
+    const modeState = document.getElementById("modeState");
     const trackingState = document.getElementById("trackingState");
+    const rateState = document.getElementById("rateState");
     const positionState = document.getElementById("positionState");
     const lineState = document.getElementById("lineState");
     const shownLineState = document.getElementById("shownLineState");
@@ -2422,6 +2436,8 @@ LIVE_HTML = """<!doctype html>
     const targetsView = document.getElementById("targetsView");
     const stopButton = document.getElementById("stopButton");
     const refreshButton = document.getElementById("refreshButton");
+    const runtimeMode = document.getElementById("runtimeMode");
+    const applyModeButton = document.getElementById("applyModeButton");
     function setBanner(message, type = "") {
       banner.textContent = message || "";
       banner.className = type ? `banner ${type}` : "banner";
@@ -2478,6 +2494,11 @@ LIVE_HTML = """<!doctype html>
       signalPanel.className = level ? `signal-panel ${level}` : "signal-panel";
       signalPanel.innerHTML = `<strong>${title}</strong><div id="signalPanelBody">${body}</div>`;
     }
+    function modeLabel(mode) {
+      if (mode === "timing_only") return "timing only";
+      if (mode === "capture_timings") return "capture";
+      return "live";
+    }
     function bindPrimaryPress(button, handler) {
       button.addEventListener("pointerdown", (event) => {
         if (event.button !== 0) return;
@@ -2509,8 +2530,11 @@ LIVE_HTML = """<!doctype html>
       const acceptedMatches = Number(metrics.accepted_matches || 0);
       const slideTriggersSent = Number(metrics.slide_triggers_sent || 0);
       const totalRms = snapshot ? Number(snapshot.rms || 0) : 0;
+      const activeMode = payload.live_tracking_mode || (snapshot ? snapshot.runtime_mode : null) || "live_audio_inference";
       runtimeState.textContent = payload.running ? "running" : "stopped";
+      modeState.textContent = modeLabel(activeMode);
       trackingState.textContent = snapshot ? snapshot.tracking_state || "idle" : "idle";
+      rateState.textContent = snapshot ? `${Number(snapshot.timeline_rate_estimate || 1).toFixed(3)}x` : "1.000x";
       positionState.textContent = snapshot && snapshot.last_match ? `${snapshot.last_match.reference_timestamp.toFixed(2)}s` : "none";
       lineState.textContent = snapshot && snapshot.matched_slide_command ? String(snapshot.matched_slide_command.slide_number) : "none";
       shownLineState.textContent = snapshot && snapshot.last_slide_command ? String(snapshot.last_slide_command.slide_number) : "none";
@@ -2519,6 +2543,8 @@ LIVE_HTML = """<!doctype html>
       holdState.textContent = snapshot && snapshot.alignment_hold_active ? (snapshot.alignment_hold_reason || "hold") : "none";
       snapshotView.textContent = JSON.stringify(snapshot, null, 2);
       logsView.textContent = (payload.logs || []).join("\\n") || "No logs yet.";
+      runtimeMode.value = payload.running ? activeMode : (runtimeMode.value || activeMode);
+      applyModeButton.disabled = !payload.running;
       deviceHint.textContent = usingLoopbackInput
         ? "Loopback input selected. This is the right choice for matching the saved song playback."
         : "For real song matching, switch to BlackHole or another loopback input. The laptop microphone will usually not track the saved song reliably.";
@@ -2574,11 +2600,27 @@ LIVE_HTML = """<!doctype html>
           "A little audio is reaching the input, but not enough to match reliably. Check Mac output routing and make sure the song is playing into the loopback device.",
         );
       } else if (featureFramesProcessed > 0) {
-        signalHint.textContent = "Audio is reaching the matcher. If tracking still does not lock, the issue is matching quality rather than device routing.";
+        if (activeMode === "timing_only") {
+          signalHint.textContent = "Timing only mode is active. Audio is not used for matching until you switch back to live inference.";
+          setSignalPanel(
+            "ok",
+            "Timing only mode",
+            "The runtime is following the saved lyric timing from the current anchor. Click a line to set or correct the anchor, or switch back to live inference to use audio matching again.",
+          );
+        } else {
+          signalHint.textContent = "Audio is reaching the matcher. If tracking still does not lock, the issue is matching quality rather than device routing.";
+          setSignalPanel(
+            "ok",
+            "Audio detected",
+            "The matcher is receiving usable signal. If lyrics still do not move, the next issue is profile quality or song mismatch, not routing.",
+          );
+        }
+      } else if (activeMode === "timing_only") {
+        signalHint.textContent = "Timing only mode is active. Click a line once to set the current timing anchor.";
         setSignalPanel(
           "ok",
-          "Audio detected",
-          "The matcher is receiving usable signal. If lyrics still do not move, the next issue is profile quality or song mismatch, not routing.",
+          "Waiting for timing anchor",
+          "This mode ignores live matching. Click the correct lyric line once, and the runtime will continue using saved timing from there.",
         );
       } else {
         signalHint.textContent = "Signal is present but not stable yet. Let the song play a little longer so the matcher can search.";
@@ -2641,16 +2683,44 @@ LIVE_HTML = """<!doctype html>
     device.addEventListener("change", () => render());
     document.getElementById("startForm").addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (runtimeMode.value === "capture_timings") {
+        window.location.href = window.location.pathname.replace(/\\/live$/, "/prepare");
+        return;
+      }
       try {
         state.payload = await api("/start", {
           method: "POST",
           body: JSON.stringify({
+            live_tracking_mode: runtimeMode.value,
             input_device: Number(device.value),
             silence_threshold_rms: Number(document.getElementById("silenceThreshold").value),
             match_debug_logging: document.getElementById("matchDebugLogging").value === "true",
           }),
         });
-        setBanner("Runtime started.");
+        setBanner(
+          runtimeMode.value === "timing_only"
+            ? "Runtime started in timing only mode. Click a line to set the first anchor."
+            : "Runtime started."
+        );
+        render();
+      } catch (error) { setBanner(error.message, "error"); }
+    });
+    applyModeButton.addEventListener("click", async () => {
+      if (!state.payload || !state.payload.running) return;
+      if (runtimeMode.value === "capture_timings") {
+        window.location.href = window.location.pathname.replace(/\\/live$/, "/prepare");
+        return;
+      }
+      try {
+        state.payload = await api("/mode", {
+          method: "POST",
+          body: JSON.stringify({ live_tracking_mode: runtimeMode.value }),
+        });
+        setBanner(
+          runtimeMode.value === "timing_only"
+            ? "Timing only mode is active."
+            : "Live audio inference resumed."
+        );
         render();
       } catch (error) { setBanner(error.message, "error"); }
     });
@@ -3208,6 +3278,7 @@ class RuntimeManager:
         self._report = None
         self._error: str | None = None
         self._slide_targets: list[dict[str, object]] = []
+        self._live_tracking_mode = "live_audio_inference"
         self._lock = Lock()
         self.status_collector = StatusCollector()
         self.log_buffer = LogBuffer()
@@ -3232,6 +3303,11 @@ class RuntimeManager:
                 raise ValueError("runtime is already running")
             self._report = None
             self._error = None
+            self._live_tracking_mode = getattr(
+                config,
+                "live_tracking_mode",
+                "live_audio_inference",
+            )
             runtime = build_runtime(
                 config,
                 self.logger,
@@ -3279,6 +3355,24 @@ class RuntimeManager:
     def runtime(self):
         with self._lock:
             return self._runtime
+
+    def live_tracking_mode(self) -> str:
+        with self._lock:
+            runtime = self._runtime
+            if runtime is not None:
+                return runtime.live_tracking_mode()
+            return self._live_tracking_mode
+
+    def set_live_tracking_mode(self, mode: str) -> str:
+        with self._lock:
+            runtime = self._runtime
+            self._live_tracking_mode = mode
+        if runtime is None:
+            return mode
+        updated_mode = runtime.set_live_tracking_mode(mode)
+        with self._lock:
+            self._live_tracking_mode = updated_mode
+        return updated_mode
 
     def report(self):
         with self._lock:
@@ -3749,6 +3843,7 @@ def main() -> None:
                 self._write_json(
                     {
                         "running": manager.running(),
+                        "live_tracking_mode": manager.live_tracking_mode(),
                         "snapshot": _snapshot_to_dict(manager.status_collector.snapshot()),
                         "report": None if manager.report() is None else asdict(manager.report()),
                         "error": manager.error(),
@@ -4059,12 +4154,16 @@ def main() -> None:
                         profile_path = song_library.profile_path(song_id)
                         if not _profile_has_coarse_artifacts(profile_path):
                             _build_reference_profile_for_song(song_library, song_id)
+                        live_tracking_mode = str(
+                            payload.get("live_tracking_mode", "live_audio_inference")
+                        )
                         config = replace(
                             AppConfig.from_env(),
                             audio_source="microphone",
                             input_device=int(payload.get("input_device", 0)),
                             reference_profile_path=str(song_library.profile_path(song_id)),
                             feature_model_path=str(ROOT / "models" / "wav2vec2-base.onnx"),
+                            live_tracking_mode=live_tracking_mode,
                             presentation_mode="logging",
                             block_size=4_096,
                             audio_queue_capacity=32,
@@ -4093,6 +4192,14 @@ def main() -> None:
                         manager.start(config)
                     elif action == "stop":
                         manager.stop()
+                    elif action == "mode":
+                        runtime = manager.runtime()
+                        if runtime is None:
+                            raise ValueError("runtime is not running")
+                        live_tracking_mode = str(
+                            payload.get("live_tracking_mode", "live_audio_inference")
+                        )
+                        manager.set_live_tracking_mode(live_tracking_mode)
                     elif action == "manual/on":
                         runtime = manager.runtime()
                         if runtime is None:
@@ -4124,6 +4231,7 @@ def main() -> None:
                     self._write_json(
                         {
                             "running": manager.running(),
+                            "live_tracking_mode": manager.live_tracking_mode(),
                             "snapshot": _snapshot_to_dict(manager.status_collector.snapshot()),
                             "report": None if manager.report() is None else asdict(manager.report()),
                             "error": manager.error(),

@@ -181,6 +181,8 @@ class ManualOverrideController:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeReport:
+    runtime_mode: str
+    timeline_rate_estimate: float
     device_name: str
     metrics: RuntimeMetrics
     rms: float
@@ -207,6 +209,8 @@ class RuntimeReport:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeStatusSnapshot:
+    runtime_mode: str
+    timeline_rate_estimate: float
     device_name: str
     metrics: RuntimeMetrics
     rms: float
@@ -275,6 +279,7 @@ class AudioIngestionRuntime:
         reacquire_min_duration_seconds: float = 0.0,
         emit_diagnostic_logs: bool = True,
         emit_match_debug_logs: bool = False,
+        live_tracking_mode: str = "live_audio_inference",
     ) -> None:
         self._source = source
         self._queue = BoundedAudioQueue(queue_capacity)
@@ -314,6 +319,7 @@ class AudioIngestionRuntime:
         self._reacquire_min_duration_seconds = reacquire_min_duration_seconds
         self._emit_diagnostic_logs = emit_diagnostic_logs
         self._emit_match_debug_logs = emit_match_debug_logs
+        self._live_tracking_mode = self._normalize_live_tracking_mode(live_tracking_mode)
         self._metrics = RuntimeMetrics()
         self._metrics_lock = Lock()
         self._stop_requested = Event()
@@ -322,6 +328,8 @@ class AudioIngestionRuntime:
         self._consecutive_silent_chunks = 0
         self._consecutive_non_voiced_chunks = 0
         self._last_match: MatchResult | None = None
+        self._current_reference_timestamp: float | None = None
+        self._current_reference_confidence: float = 0.0
         self._last_slide_command: SlideCommand | None = None
         self._timeline_mode = "SEARCHING"
         self._timeline_anchor_reference_timestamp: float | None = None
@@ -378,6 +386,8 @@ class AudioIngestionRuntime:
         self._publish_status()
         snapshot = self._build_status_snapshot()
         return RuntimeReport(
+            runtime_mode=snapshot.runtime_mode,
+            timeline_rate_estimate=snapshot.timeline_rate_estimate,
             device_name=snapshot.device_name,
             metrics=snapshot.metrics,
             rms=snapshot.rms,
@@ -401,6 +411,34 @@ class AudioIngestionRuntime:
             alignment_hold_active=snapshot.alignment_hold_active,
             alignment_hold_reason=snapshot.alignment_hold_reason,
         )
+
+    @staticmethod
+    def _normalize_live_tracking_mode(mode: str) -> str:
+        normalized = str(mode or "").strip().lower()
+        if normalized in {"timing_only", "live_audio_inference"}:
+            return normalized
+        raise ValueError("live tracking mode must be 'live_audio_inference' or 'timing_only'")
+
+    def live_tracking_mode(self) -> str:
+        return self._live_tracking_mode
+
+    def set_live_tracking_mode(self, mode: str) -> str:
+        normalized = self._normalize_live_tracking_mode(mode)
+        self._live_tracking_mode = normalized
+        if normalized == "timing_only":
+            if self._last_match is None or not self._last_match.valid:
+                self._alignment_hold_active = True
+                self._alignment_hold_reason = "timing_only_waiting_for_anchor"
+            else:
+                self._alignment_hold_active = False
+                self._alignment_hold_reason = None
+        else:
+            self._timing_only_hold_elapsed_seconds = 0.0
+            if self._alignment_hold_reason == "timing_only_waiting_for_anchor":
+                self._alignment_hold_active = False
+                self._alignment_hold_reason = None
+        self._publish_status()
+        return self._live_tracking_mode
 
     def stop(self) -> None:
         self._stop_requested.set()
@@ -474,6 +512,7 @@ class AudioIngestionRuntime:
             raise ValueError("slide resolver does not support operator slide jumps")
 
         command = build_command(slide_number, confidence=1.0)
+        detected_match = self._last_match
         if activate_manual_override:
             self._manual_override_controller.activate()
         if realign_tracker:
@@ -483,10 +522,11 @@ class AudioIngestionRuntime:
             seek_to_slide(slide_number)
             self.force_match_anchor(command.reference_timestamp)
             self._manual_timeline_anchor_active = True
+            self._set_manual_timeline_anchor(command, observed_at=monotonic())
         self._alignment_hold_active = False
         self._alignment_hold_reason = None
         if record_correction:
-            self._record_operator_correction(command)
+            self._record_operator_correction(command, detected_match=detected_match)
         self._manual_jump_display_active = True
         self.emit_operator_slide_command(command)
         return command
@@ -516,6 +556,14 @@ class AudioIngestionRuntime:
         squared = np.square(chunk.samples, dtype=np.float32)
         self._last_rms = float(np.sqrt(np.mean(squared, dtype=np.float32)))
         self._last_peak = float(np.max(np.abs(chunk.samples)))
+        if self._live_tracking_mode == "timing_only":
+            if self._advance_timeline_from_chunk(chunk, enforce_hold_limit=False):
+                self._alignment_hold_active = False
+                self._alignment_hold_reason = None
+            else:
+                self._alignment_hold_active = True
+                self._alignment_hold_reason = "timing_only_waiting_for_anchor"
+            return
         is_silent = self._last_rms <= self._silence_threshold_rms
         with self._metrics_lock:
             if is_silent:
@@ -559,15 +607,22 @@ class AudioIngestionRuntime:
             self._timing_only_hold_elapsed_seconds = 0.0
             self._record_feature_frames(frames, allow_matching=True)
 
-    def _record_operator_correction(self, command: SlideCommand) -> None:
+    def _record_operator_correction(
+        self,
+        command: SlideCommand,
+        *,
+        detected_match: MatchResult | None = None,
+    ) -> None:
         if self._operator_correction_sink is None:
             return
+        if detected_match is None:
+            detected_match = self._last_match
         record = OperatorCorrectionRecord(
             profile_name=self._profile_name,
             detected_reference_timestamp=(
-                None if self._last_match is None else self._last_match.reference_timestamp
+                None if detected_match is None else detected_match.reference_timestamp
             ),
-            detected_confidence=None if self._last_match is None else self._last_match.confidence,
+            detected_confidence=None if detected_match is None else detected_match.confidence,
             chosen_reference_timestamp=command.reference_timestamp,
             chosen_slide_number=command.slide_number,
             chosen_section=command.section,
@@ -686,6 +741,9 @@ class AudioIngestionRuntime:
     ) -> None:
         self._log_match_debug()
         self._last_match = result
+        if result.valid:
+            self._current_reference_timestamp = result.reference_timestamp
+            self._current_reference_confidence = result.confidence
         self._alignment_hold_active = not result.valid
         self._alignment_hold_reason = "low_confidence" if not result.valid else None
         if count_metrics:
@@ -699,44 +757,66 @@ class AudioIngestionRuntime:
         tracking_state = self._tracking_state()
         if tracking_state in {"SEARCHING", "UNINITIALIZED", "UNCERTAIN"}:
             return
-        if self._slide_resolver is not None:
-            command = self._slide_resolver.resolve(result)
-            if command is not None:
-                self._manual_jump_display_active = False
-                self._log_slide_command_decision(
-                    source="auto",
-                    command=command,
-                    match_result=result,
-                )
-                self._emit_slide_command(command)
+        command = self._timeline_slide_command(result)
+        if command is not None:
+            self._manual_jump_display_active = False
+            self._log_slide_command_decision(
+                source="auto",
+                command=command,
+                match_result=result,
+            )
+            self._emit_slide_command(command)
 
-    def _hold_timeline_during_silence(self, chunk: AudioChunk) -> bool:
+    def _chunk_duration_seconds(self, chunk: AudioChunk) -> float:
+        chunk_sample_count = float(chunk.samples.size) if chunk.samples.size else 0.0
+        if chunk_sample_count <= 0.0:
+            return 0.0
+        return chunk_sample_count / float(self._audio_sample_rate_hz)
+
+    def _advance_timeline_from_chunk(
+        self,
+        chunk: AudioChunk,
+        *,
+        enforce_hold_limit: bool,
+    ) -> bool:
         if self._last_match is None or not self._last_match.valid:
             return False
-        chunk_duration_seconds = float(chunk.samples.size) if chunk.samples.size else 0.0
+        chunk_duration_seconds = self._chunk_duration_seconds(chunk)
         if chunk_duration_seconds <= 0.0:
             return False
         if (
-            self._timing_only_hold_elapsed_seconds + chunk_duration_seconds / float(self._audio_sample_rate_hz)
+            enforce_hold_limit
+            and self._timing_only_hold_elapsed_seconds + chunk_duration_seconds
             > self._timeline_hold_max_seconds
         ):
             return False
-        self._timing_only_hold_elapsed_seconds += (
-            chunk_duration_seconds / float(self._audio_sample_rate_hz)
+        self._timing_only_hold_elapsed_seconds += chunk_duration_seconds
+        observed_at = (
+            self._timeline_anchor_observed_at + self._timing_only_hold_elapsed_seconds
+            if self._timeline_anchor_observed_at is not None
+            else monotonic()
         )
         held_result = MatchResult(
             reference_frame=self._last_match.reference_frame,
             reference_timestamp=(
                 self._last_match.reference_timestamp
-                + chunk_duration_seconds / float(self._audio_sample_rate_hz)
+                + chunk_duration_seconds
             ),
             raw_distance=self._last_match.raw_distance,
             normalized_distance=self._last_match.normalized_distance,
             confidence=self._last_match.confidence,
             valid=True,
         )
+        self._update_timeline_anchor(
+            held_result,
+            observed_at=observed_at,
+            reset_hold_elapsed=False,
+        )
         self._apply_match_result(held_result, count_metrics=False)
         return True
+
+    def _hold_timeline_during_silence(self, chunk: AudioChunk) -> bool:
+        return self._advance_timeline_from_chunk(chunk, enforce_hold_limit=True)
 
     def _restore_from_manual_jump_if_needed(self, result: MatchResult) -> bool:
         if not result.valid or not self._manual_jump_display_active or self._slide_resolver is None:
@@ -767,6 +847,17 @@ class AudioIngestionRuntime:
         )
         self._emit_slide_command(command)
         return True
+
+    def _timeline_slide_command(self, result: MatchResult) -> SlideCommand | None:
+        if self._slide_resolver is None or not result.valid:
+            return None
+        advance_to_timestamp = getattr(self._slide_resolver, "advance_to_timestamp", None)
+        if callable(advance_to_timestamp):
+            return advance_to_timestamp(
+                result.reference_timestamp,
+                confidence=result.confidence,
+            )
+        return self._slide_resolver.resolve(result)
 
     def _log_slide_command_decision(
         self,
@@ -961,6 +1052,8 @@ class AudioIngestionRuntime:
         if callable(reset_method):
             reset_method()
         self._last_match = None
+        self._current_reference_timestamp = None
+        self._current_reference_confidence = 0.0
         self._timeline_mode = "SEARCHING"
         self._timeline_anchor_reference_timestamp = None
         self._timeline_anchor_observed_at = None
@@ -975,11 +1068,38 @@ class AudioIngestionRuntime:
         self._alignment_hold_active = True
         self._alignment_hold_reason = "silence"
 
+    def _set_manual_timeline_anchor(
+        self,
+        command: SlideCommand,
+        *,
+        observed_at: float,
+    ) -> None:
+        anchored_result = MatchResult(
+            reference_frame=(
+                0
+                if self._timeline_anchor_reference_frame is None
+                else self._timeline_anchor_reference_frame
+            ),
+            reference_timestamp=command.reference_timestamp,
+            raw_distance=0.0,
+            normalized_distance=0.0,
+            confidence=1.0,
+            valid=True,
+        )
+        self._last_match = anchored_result
+        self._current_reference_timestamp = anchored_result.reference_timestamp
+        self._current_reference_confidence = anchored_result.confidence
+        self._update_timeline_anchor(anchored_result, observed_at=observed_at)
+        self._manual_timeline_anchor_active = True
+        self._alignment_hold_active = False
+        self._alignment_hold_reason = None
+
     def _update_timeline_anchor(
         self,
         result: MatchResult,
         *,
         observed_at: float,
+        reset_hold_elapsed: bool = True,
     ) -> None:
         self._update_timeline_rate_estimate(
             observed_at=observed_at,
@@ -991,7 +1111,8 @@ class AudioIngestionRuntime:
         self._timeline_anchor_reference_frame = result.reference_frame
         self._timeline_anchor_raw_distance = result.raw_distance
         self._timeline_anchor_normalized_distance = result.normalized_distance
-        self._timing_only_hold_elapsed_seconds = 0.0
+        if reset_hold_elapsed:
+            self._timing_only_hold_elapsed_seconds = 0.0
         self._timeline_mode = "LOCKED_CLOCK"
         self._reset_reacquire_candidate()
 
@@ -1017,6 +1138,35 @@ class AudioIngestionRuntime:
         instantaneous_rate = min(max(instantaneous_rate, 0.9), 1.1)
         self._timeline_rate_estimate = (
             (self._timeline_rate_estimate * 0.8) + (instantaneous_rate * 0.2)
+        )
+
+    def _adapt_rate_from_prediction_error(
+        self,
+        *,
+        observed_at: float,
+        predicted_reference_timestamp: float,
+        actual_reference_timestamp: float,
+        confidence: float,
+    ) -> None:
+        if self._timeline_anchor_observed_at is None:
+            return
+        observed_delta = observed_at - self._timeline_anchor_observed_at
+        if observed_delta < 0.03:
+            return
+        prediction_error = actual_reference_timestamp - predicted_reference_timestamp
+        if not np.isfinite(prediction_error):
+            return
+        rate_correction = prediction_error / observed_delta
+        if not np.isfinite(rate_correction):
+            return
+        rate_correction = min(max(rate_correction, -0.02), 0.02)
+        confidence_blend = min(max((confidence - 0.75) / 0.2, 0.0), 1.0)
+        blend = 0.05 + (0.15 * confidence_blend)
+        target_rate = self._timeline_rate_estimate + rate_correction
+        target_rate = min(max(target_rate, 0.95), 1.05)
+        self._timeline_rate_estimate = (
+            (self._timeline_rate_estimate * (1.0 - blend))
+            + (target_rate * blend)
         )
 
     def _reset_reacquire_candidate(self) -> None:
@@ -1059,10 +1209,26 @@ class AudioIngestionRuntime:
             abs(result.reference_timestamp - predicted_result.reference_timestamp)
             <= self._clock_resync_tolerance_seconds
         ):
+            self._adapt_rate_from_prediction_error(
+                observed_at=frame.observed_at,
+                predicted_reference_timestamp=predicted_result.reference_timestamp,
+                actual_reference_timestamp=result.reference_timestamp,
+                confidence=result.confidence,
+            )
             self._update_timeline_anchor(result, observed_at=frame.observed_at)
             return result
 
         forward_delta = result.reference_timestamp - predicted_result.reference_timestamp
+        backward_stale_tolerance = max(0.1, self._clock_resync_tolerance_seconds * 0.5)
+        if forward_delta < -backward_stale_tolerance:
+            anchor_age = self._anchor_age_seconds(frame.observed_at)
+            self._reset_reacquire_candidate()
+            if anchor_age is not None and anchor_age <= self._timeline_hold_max_seconds:
+                self._timeline_mode = "SOFT_HOLD"
+                return predicted_result
+            self._timeline_mode = "REACQUIRE"
+            return self._invalidate(result)
+
         required_confidence = max(
             self._fast_forward_confidence_floor,
             self._timeline_anchor_confidence - 0.1,
@@ -1072,6 +1238,12 @@ class AudioIngestionRuntime:
             and forward_delta <= self._fast_forward_accept_tolerance_seconds
             and result.confidence >= required_confidence
         ):
+            self._adapt_rate_from_prediction_error(
+                observed_at=frame.observed_at,
+                predicted_reference_timestamp=predicted_result.reference_timestamp,
+                actual_reference_timestamp=result.reference_timestamp,
+                confidence=result.confidence,
+            )
             self._update_timeline_anchor(result, observed_at=frame.observed_at)
             return result
 
@@ -1212,6 +1384,8 @@ class AudioIngestionRuntime:
             self._publish_status()
 
     def _tracking_state(self) -> str | None:
+        if self._live_tracking_mode == "timing_only":
+            return "TIMING_ONLY"
         if self._feature_matcher is None:
             return None
         state_name = getattr(self._feature_matcher, "state_name", None)
@@ -1264,6 +1438,8 @@ class AudioIngestionRuntime:
     def _build_status_snapshot(self) -> RuntimeStatusSnapshot:
         controller_status = getattr(self._slide_resolver, "status", None)
         return RuntimeStatusSnapshot(
+            runtime_mode=self._live_tracking_mode,
+            timeline_rate_estimate=self._timeline_rate_estimate,
             device_name=self._device_name,
             metrics=self._snapshot_metrics(),
             rms=self._last_rms,

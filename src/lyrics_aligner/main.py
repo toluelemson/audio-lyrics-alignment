@@ -248,6 +248,10 @@ def _validate_config(config: AppConfig) -> None:
         raise ValueError("reference_profile_path is required")
     if config.feature_model_path is None:
         raise ValueError("feature_model_path is required")
+    if config.live_tracking_mode not in {"live_audio_inference", "timing_only"}:
+        raise ValueError(
+            "live_tracking_mode must be 'live_audio_inference' or 'timing_only'"
+        )
     if config.audio_source == "wav" and config.audio_file_path is None:
         raise ValueError("audio_file_path is required when audio_source=wav")
     if config.presentation_command_queue_capacity <= 0:
@@ -351,6 +355,7 @@ def build_runtime(
         audio_sample_rate_hz=config.sample_rate,
         vocal_presence_detection_enabled=profile.metadata.get("pitch_contour_enabled") == "1",
         emit_match_debug_logs=config.match_debug_logging,
+        live_tracking_mode=config.live_tracking_mode,
     )
 
 

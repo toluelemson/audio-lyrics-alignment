@@ -11,6 +11,10 @@ from lyrics_aligner.adapters.matching import (
     StabilizedFeatureMatcher,
     StabilizedFeatureMatcherConfig,
 )
+from lyrics_aligner.adapters.slides import (
+    TimelineSlideResolver,
+    TimelineSlideResolverConfig,
+)
 from lyrics_aligner.application.runtime import (
     AudioIngestionRuntime,
     BoundedAudioQueue,
@@ -23,6 +27,7 @@ from lyrics_aligner.domain.models import (
     OperatorCorrectionRecord,
     ReferenceProfile,
     SlideCommand,
+    SlideCue,
     AudioChunk,
 )
 from lyrics_aligner.ports.feature_extractor import FeatureExtractor
@@ -888,6 +893,77 @@ def test_runtime_accepts_strong_nearby_forward_progress_immediately() -> None:
     assert report.last_match.reference_timestamp == 2.2
 
 
+def test_runtime_ignores_repeated_stale_matches_behind_predicted_timeline() -> None:
+    matcher: FeatureMatcher = SequenceMatcher(
+        [
+            MatchResult(1, 0.25, 0.1, 0.1, 0.95, True),
+            MatchResult(1, 0.25, 0.1, 0.1, 0.95, True),
+            MatchResult(1, 0.25, 0.1, 0.1, 0.95, True),
+        ]
+    )
+    slide_resolver: SlideResolver = ThresholdSlideResolver(1.0)
+    gateway = RecordingPresentationGateway()
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.03,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-stale-match-guard"),
+        feature_extractor=SequenceFeatureExtractor([0.25, 1.55, 1.85]),
+        feature_matcher=matcher,
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+        clock_resync_tolerance_seconds=1.0,
+        timeline_hold_max_seconds=3.0,
+    )
+
+    report = runtime.run()
+
+    assert report.last_match is not None
+    assert report.last_match.reference_timestamp > 1.0
+    assert report.metrics.slide_triggers_sent == 1
+    assert len(gateway.commands) == 1
+
+
+def test_runtime_adapts_rate_from_short_interval_consistent_drift() -> None:
+    matcher: FeatureMatcher = SequenceMatcher(
+        [
+            MatchResult(1, 10.000, 0.1, 0.1, 0.95, True),
+            MatchResult(2, 10.051, 0.1, 0.1, 0.95, True),
+            MatchResult(3, 10.102, 0.1, 0.1, 0.95, True),
+        ]
+    )
+    runtime = AudioIngestionRuntime(
+        source=SimulatedAudioSource(
+            SimulatedAudioConfig(
+                sample_rate=1_000,
+                block_size=10,
+                duration=0.03,
+                frequency=100,
+                amplitude=0.25,
+            )
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-short-interval-rate-adaptation"),
+        feature_extractor=SequenceFeatureExtractor([0.00, 0.05, 0.10]),
+        feature_matcher=matcher,
+        diagnostics_interval_seconds=1.0,
+        timeline_hold_max_seconds=2.0,
+    )
+
+    report = runtime.run()
+
+    assert report.last_match is not None
+    assert report.timeline_rate_estimate > 1.0005
+
+
 def test_runtime_detects_non_voiced_chunks_for_pitch_aware_profiles() -> None:
     runtime = AudioIngestionRuntime(
         source=SimulatedAudioSource(
@@ -1213,6 +1289,120 @@ def test_runtime_manual_reanchor_stops_timing_hold_after_max_silence_window() ->
     assert report.alignment_hold_active is True
     assert report.alignment_hold_reason == "silence"
     assert report.last_match is None
+
+
+def test_runtime_timing_only_mode_advances_from_manual_anchor() -> None:
+    slide_resolver = OperatorJumpSlideResolver()
+    gateway = RecordingPresentationGateway()
+    runtime = AudioIngestionRuntime(
+        source=SequenceAudioSource(
+            [
+                AudioChunk(
+                    samples=np.ones(1_000, dtype=np.float32) * 0.25,
+                    captured_at=0.00,
+                    sequence_number=0,
+                ),
+                AudioChunk(
+                    samples=np.ones(1_000, dtype=np.float32) * 0.25,
+                    captured_at=1.00,
+                    sequence_number=1,
+                ),
+            ]
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-timing-only"),
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+        audio_sample_rate_hz=1_000,
+        live_tracking_mode="timing_only",
+    )
+
+    runtime.jump_to_slide(3, realign_tracker=True)
+    report = runtime.run()
+
+    assert report.runtime_mode == "timing_only"
+    assert report.tracking_state == "TIMING_ONLY"
+    assert report.last_match is not None
+    assert report.last_match.reference_timestamp == pytest.approx(32.0)
+    assert report.matched_slide_command is not None
+    assert report.matched_slide_command.slide_number == 4
+
+
+def test_runtime_mode_can_switch_to_timing_only_without_restart() -> None:
+    runtime = AudioIngestionRuntime(
+        source=SequenceAudioSource([]),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-mode-switch"),
+        diagnostics_interval_seconds=1.0,
+    )
+
+    updated_mode = runtime.set_live_tracking_mode("timing_only")
+    snapshot = runtime._build_status_snapshot()  # noqa: SLF001
+
+    assert updated_mode == "timing_only"
+    assert snapshot.runtime_mode == "timing_only"
+    assert snapshot.tracking_state == "TIMING_ONLY"
+    assert snapshot.alignment_hold_active is True
+    assert snapshot.alignment_hold_reason == "timing_only_waiting_for_anchor"
+
+
+def test_runtime_emits_future_slides_from_timeline_hold_path() -> None:
+    profile = ReferenceProfile(
+        name="song-a",
+        frames=(),
+        metadata={},
+        slide_cues=(
+            SlideCue(1, "Verse 1", "Amazing grace", 10.0),
+            SlideCue(2, "Verse 2", "How sweet the sound", 10.5),
+        ),
+    )
+    slide_resolver = TimelineSlideResolver(
+        profile,
+        TimelineSlideResolverConfig(
+            lookahead_seconds=0.0,
+            cooldown_seconds=0.0,
+            consecutive_match_count=2,
+        ),
+    )
+    gateway = RecordingPresentationGateway()
+    runtime = AudioIngestionRuntime(
+        source=SequenceAudioSource(
+            [
+                AudioChunk(
+                    samples=np.zeros(250, dtype=np.float32),
+                    captured_at=0.00,
+                    sequence_number=0,
+                ),
+                AudioChunk(
+                    samples=np.zeros(250, dtype=np.float32),
+                    captured_at=0.25,
+                    sequence_number=1,
+                ),
+                AudioChunk(
+                    samples=np.zeros(250, dtype=np.float32),
+                    captured_at=0.50,
+                    sequence_number=2,
+                ),
+            ]
+        ),
+        queue_capacity=4,
+        logger=logging.getLogger("test-runtime-timeline-first-emission"),
+        slide_resolver=slide_resolver,
+        presentation_gateway=gateway,
+        diagnostics_interval_seconds=1.0,
+        silence_threshold_rms=0.01,
+        silence_reset_chunk_count=99,
+        audio_sample_rate_hz=1_000,
+        timeline_hold_max_seconds=2.0,
+    )
+
+    runtime.jump_to_slide(1, realign_tracker=True)
+    report = runtime.run()
+
+    assert report.last_match is not None
+    assert report.last_match.reference_timestamp == pytest.approx(10.75)
+    assert [command.slide_number for command in gateway.commands] == [1, 2]
 
 
 def test_runtime_auto_recovers_after_wrong_manual_jump() -> None:

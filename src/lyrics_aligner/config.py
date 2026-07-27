@@ -42,6 +42,7 @@ class AppConfig:
     audio_file_path: str | None = None
     reference_profile_path: str | None = None
     feature_model_path: str | None = None
+    live_tracking_mode: str = "live_audio_inference"
     presentation_mode: str = "logging"
     match_confidence_threshold: float = 0.6
     match_ambiguity_distance_margin: float = 0.03
@@ -87,6 +88,10 @@ class AppConfig:
             audio_file_path=os.getenv("LYRICS_ALIGNER_AUDIO_FILE_PATH"),
             reference_profile_path=os.getenv("LYRICS_ALIGNER_REFERENCE_PROFILE_PATH"),
             feature_model_path=os.getenv("LYRICS_ALIGNER_FEATURE_MODEL_PATH"),
+            live_tracking_mode=_read_str(
+                "LYRICS_ALIGNER_LIVE_TRACKING_MODE",
+                "live_audio_inference",
+            ),
             presentation_mode=_read_str("LYRICS_ALIGNER_PRESENTATION_MODE", "logging"),
             match_confidence_threshold=_read_float(
                 "LYRICS_ALIGNER_MATCH_CONFIDENCE_THRESHOLD",
