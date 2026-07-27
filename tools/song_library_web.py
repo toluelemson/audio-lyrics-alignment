@@ -407,12 +407,6 @@ PREPARE_HTML = """<!doctype html>
         radial-gradient(circle at top left, #fff6de 0, transparent 28rem),
         linear-gradient(180deg, #f7f1e8 0%, var(--bg) 100%);
     }
-    body.focus-mode .details-only {
-      display: none !important;
-    }
-    body.focus-mode .grid {
-      grid-template-columns: 1fr;
-    }
     .shell { max-width: 960px; margin: 0 auto; padding: 24px; }
     .hero { margin-bottom: 24px; }
     .back { color: var(--muted); text-decoration: none; }
@@ -466,6 +460,34 @@ PREPARE_HTML = """<!doctype html>
     .secondary { background: #eadfce; color: var(--ink); }
     .success { background: var(--ok); color: #f3fff7; }
     .caption { color: var(--muted); margin-top: 10px; font-size: 0.9rem; }
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 16px;
+    }
+    .workflow-step {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px 14px;
+      background: rgba(255,255,255,0.7);
+    }
+    .workflow-step strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 0.95rem;
+    }
+    .workflow-step span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.35;
+    }
+    .workflow-step.active {
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+      background: linear-gradient(135deg, #fff2e8 0%, #fffaf4 100%);
+      box-shadow: 0 0 0 3px rgba(165, 75, 42, 0.08);
+    }
     .clip-bar {
       display: grid;
       gap: 8px;
@@ -555,6 +577,35 @@ PREPARE_HTML = """<!doctype html>
     }
     .step-banner strong { color: var(--ink); }
     .step-banner.active { display: block; }
+    .advanced-tools {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.72);
+      overflow: hidden;
+    }
+    .advanced-tools summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 14px 16px;
+      font-weight: 700;
+      background: rgba(248, 240, 229, 0.9);
+    }
+    .advanced-tools summary::-webkit-details-marker {
+      display: none;
+    }
+    .advanced-tools[open] summary {
+      border-bottom: 1px solid var(--line);
+    }
+    .advanced-body {
+      padding: 14px 16px 16px;
+    }
+    .advanced-copy {
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.45;
+      margin: 0 0 10px;
+    }
     audio { display: none; }
     .player-shell {
       margin-top: 6px;
@@ -672,6 +723,9 @@ PREPARE_HTML = """<!doctype html>
     .banner { margin-top: 14px; min-height: 1.5rem; color: var(--ok); }
     .banner.error { color: #9b1d1d; }
     @media (max-width: 980px) {
+      .workflow {
+        grid-template-columns: 1fr;
+      }
       .player-main {
         grid-template-columns: auto auto 1fr;
       }
@@ -707,7 +761,21 @@ PREPARE_HTML = """<!doctype html>
     </div>
     <div class="grid">
       <section class="card">
-        <div class="step-banner" id="stepBanner"><strong>How to use this:</strong> Play the song externally, click <strong>Use System Playback</strong>, click lines as they happen, then click <strong>Save Timings</strong>.</div>
+        <div class="workflow" id="workflowSteps">
+          <div class="workflow-step active" id="workflowAudio">
+            <strong>1. Choose audio</strong>
+            <span>Upload audio here or keep using system playback.</span>
+          </div>
+          <div class="workflow-step" id="workflowCapture">
+            <strong>2. Start and click lines</strong>
+            <span>Press Start, then click each lyric when it begins.</span>
+          </div>
+          <div class="workflow-step" id="workflowSave">
+            <strong>3. Save timings</strong>
+            <span>Save when the pass is done so replay uses these cues.</span>
+          </div>
+        </div>
+        <div class="step-banner" id="stepBanner"><strong>How to use this:</strong> Press <strong>Start</strong>, click each lyric line when it begins, then click <strong>Save Timings</strong>.</div>
         <div class="status">
           <div class="pill" id="progressPill">0 / 0 captured</div>
           <div class="pill" id="nextPill">Next: none</div>
@@ -749,25 +817,35 @@ PREPARE_HTML = """<!doctype html>
           <button class="secondary" id="refreshCaptureDevicesButton" type="button">Refresh Inputs</button>
         </div>
         <div class="timer" id="timer">00:00.000</div>
-        <div class="controls" style="margin-top:0">
-          <button class="secondary" id="toggleModeButton" type="button">Edit Timings</button>
-        </div>
-        <div class="controls details-only" id="clipControls" style="margin-top:12px">
-          <button class="secondary" id="setClipStartButton" type="button">Set Start</button>
-          <button class="secondary" id="setClipEndButton" type="button">Set End</button>
-          <button class="success" id="saveClipButton" type="button">Save Clip</button>
-          <button class="secondary" id="clearClipButton" type="button">Use Whole Song</button>
-          <button class="secondary" id="resetSavedTimingsButton" type="button">Reset Timings</button>
-        </div>
-        <div class="clip-bar details-only" id="clipBar">
-          <div class="clip-labels">
-            <span id="clipStartLabel">Start 00:00.000</span>
-            <span id="clipEndLabel">End full song</span>
+        <details class="advanced-tools" id="advancedTools">
+          <summary>More Tools</summary>
+          <div class="advanced-body">
+            <p class="advanced-copy">Use these only when you need to start from the middle, fine-tune timings, or set a clip window.</p>
+            <div class="controls" style="margin-top:0">
+              <button class="secondary" id="startFromSelectedButton">Start At Selected Line</button>
+              <button class="secondary" id="undoButton" disabled>Undo Last</button>
+              <button class="secondary" id="resetButton">Clear All</button>
+              <button class="secondary" id="nudgeBack50" disabled>Earlier</button>
+              <button class="secondary" id="nudgeForward50" disabled>Later</button>
+            </div>
+            <div class="controls" id="clipControls" style="margin-top:12px">
+              <button class="secondary" id="setClipStartButton" type="button">Set Start</button>
+              <button class="secondary" id="setClipEndButton" type="button">Set End</button>
+              <button class="success" id="saveClipButton" type="button">Save Clip</button>
+              <button class="secondary" id="clearClipButton" type="button">Use Whole Song</button>
+              <button class="secondary" id="resetSavedTimingsButton" type="button">Reset Timings</button>
+            </div>
+            <div class="clip-bar" id="clipBar">
+              <div class="clip-labels">
+                <span id="clipStartLabel">Start 00:00.000</span>
+                <span id="clipEndLabel">End full song</span>
+              </div>
+              <input class="clip-range" id="clipStartRange" type="range" min="0" max="0" step="0.01" value="0">
+              <input class="clip-range" id="clipEndRange" type="range" min="0" max="0" step="0.01" value="0">
+            </div>
+            <div class="caption" id="clipSummary">Clip: full song</div>
           </div>
-          <input class="clip-range" id="clipStartRange" type="range" min="0" max="0" step="0.01" value="0">
-          <input class="clip-range" id="clipEndRange" type="range" min="0" max="0" step="0.01" value="0">
-        </div>
-        <div class="caption details-only" id="clipSummary">Clip: full song</div>
+        </details>
         <div class="stage">
           <div class="stage-panel current" id="currentPanel">
             <div class="stage-label" id="currentLabel">Click This Line Now</div>
@@ -776,21 +854,14 @@ PREPARE_HTML = """<!doctype html>
           </div>
         </div>
         <div class="controls" id="primaryControls">
-          <button class="primary" id="startButton">Start From Beginning</button>
-          <button class="secondary" id="startFromSelectedButton">Start From Selected</button>
+          <button class="primary" id="startButton">Start</button>
           <button class="success" id="saveButton" disabled>Save Timings</button>
         </div>
-        <div class="controls details-only" style="margin-top:12px">
-          <button class="secondary" id="undoButton" disabled>Undo Last</button>
-          <button class="secondary" id="resetButton">Clear All</button>
-          <button class="secondary" id="nudgeBack50" disabled>Earlier</button>
-          <button class="secondary" id="nudgeForward50" disabled>Later</button>
-        </div>
         <div class="save-reminder" id="saveReminder"><strong>Save reminder</strong>Click <strong>Save Timings</strong> before leaving or starting over.</div>
-        <div class="caption" id="modeCaption">Click the matching line at the moment it should appear. Review mode lets you jump the reference audio by clicking a saved line.</div>
+        <div class="caption" id="modeCaption">Press Start, click the lyric line when it begins, then save. After saving, clicking a saved line jumps the audio there for review.</div>
         <div class="banner" id="banner"></div>
       </section>
-      <aside class="card details-only">
+      <aside class="card">
         <h2 style="margin-top:0">Line Timeline</h2>
         <div class="timeline-feedback" id="timelineFeedback" aria-live="polite"><strong>Timeline feedback</strong>During training, the line you click turns green. In review, clicking a saved line jumps the reference audio to that spot.</div>
         <ol class="list" id="capturedList"></ol>
@@ -805,7 +876,6 @@ PREPARE_HTML = """<!doctype html>
       timerHandle: null,
       selectedCueIndex: null,
       pendingCueIndex: null,
-      mode: "capture",
       clipDraftStartSeconds: bootstrapSession.clip_start_seconds || 0,
       clipDraftEndSeconds: bootstrapSession.clip_end_seconds,
       clipDraftDirty: false,
@@ -827,6 +897,9 @@ PREPARE_HTML = """<!doctype html>
     const audioManagerInput = document.getElementById("audioManagerInput");
     const progressPill = document.getElementById("progressPill");
     const nextPill = document.getElementById("nextPill");
+    const workflowAudio = document.getElementById("workflowAudio");
+    const workflowCapture = document.getElementById("workflowCapture");
+    const workflowSave = document.getElementById("workflowSave");
     const timer = document.getElementById("timer");
     const currentMeta = document.getElementById("currentMeta");
     const currentLyrics = document.getElementById("currentLyrics");
@@ -848,9 +921,9 @@ PREPARE_HTML = """<!doctype html>
     const liveFeedControls = document.getElementById("liveFeedControls");
     const captureDeviceSelect = document.getElementById("captureDeviceSelect");
     const refreshCaptureDevicesButton = document.getElementById("refreshCaptureDevicesButton");
-    const toggleModeButton = document.getElementById("toggleModeButton");
     const modeCaption = document.getElementById("modeCaption");
     const primaryControls = document.getElementById("primaryControls");
+    const advancedTools = document.getElementById("advancedTools");
     const clipControls = document.getElementById("clipControls");
     const clipSummary = document.getElementById("clipSummary");
     const setClipStartButton = document.getElementById("setClipStartButton");
@@ -863,10 +936,6 @@ PREPARE_HTML = """<!doctype html>
     const clipEndLabel = document.getElementById("clipEndLabel");
     const clipStartRange = document.getElementById("clipStartRange");
     const clipEndRange = document.getElementById("clipEndRange");
-    document.body.classList.add("focus-mode");
-    function isEditMode() {
-      return state.mode === "edit";
-    }
     function clipStartSeconds() {
       return Number(state.session?.clip_start_seconds || 0);
     }
@@ -996,6 +1065,9 @@ PREPARE_HTML = """<!doctype html>
       const hasAudio = Boolean(state.session && state.session.audio_available);
       manageAudioButton.textContent = hasAudio ? "Replace Audio" : "Attach Audio";
       deleteAudioButton.style.display = hasAudio ? "inline-block" : "none";
+      clipControls.style.display = hasAudio ? "flex" : "none";
+      clipBar.style.display = hasAudio ? "grid" : "none";
+      clipSummary.style.display = hasAudio ? "block" : "none";
       if (hasAudio) {
         if (!audio.src) audio.src = `${apiBase}/audio`;
         externalAudioNote.style.display = "none";
@@ -1018,6 +1090,19 @@ PREPARE_HTML = """<!doctype html>
       }
       if (isReviewMode()) {
         externalAudioNote.innerHTML = "<strong>System audio saved</strong>This song now has recorded reference audio. You can replay it here, keep adjusting timings, or build a profile.";
+      }
+    }
+    function syncWorkflow() {
+      const hasAudio = Boolean(state.session && state.session.audio_available);
+      const training = isTrainingMode();
+      const review = isReviewMode();
+      workflowAudio.classList.toggle("active", !training && !review);
+      workflowCapture.classList.toggle("active", training);
+      workflowSave.classList.toggle("active", review || hasUnsavedTimings());
+      if (!hasAudio) {
+        workflowAudio.querySelector("span").textContent = "No upload needed. Play the song anywhere and click lines here.";
+      } else {
+        workflowAudio.querySelector("span").textContent = "Replay and edit against the uploaded reference audio.";
       }
     }
     async function loadCaptureDevices() {
@@ -1245,19 +1330,16 @@ PREPARE_HTML = """<!doctype html>
       [nudgeBack50, nudgeForward50].forEach((button) => { button.disabled = !canNudge; });
       updateSaveReminder();
       syncAudioUi();
+      syncWorkflow();
       syncReviewAudioPosition();
       if (state.session.audio_available) {
         startButton.textContent = canCaptureCurrent ? "Capture Running" : (reviewMode ? "Start New Pass" : "Start");
-        startFromSelectedButton.textContent = "Start At Selected Line";
       } else {
-        startButton.textContent = canCaptureCurrent ? "Capture Running" : (reviewMode ? "Start New Pass" : "Start Capture");
-        startFromSelectedButton.textContent = "Start At Selected Line";
+        startButton.textContent = canCaptureCurrent ? "Capture Running" : (reviewMode ? "Start New Pass" : "Start");
       }
+      startFromSelectedButton.textContent = "Start At Selected Line";
       const activeClipStart = draftClipStartSeconds();
       const activeClipEnd = draftClipEndSeconds();
-      clipControls.style.display = state.session.audio_available && isEditMode() ? "flex" : "none";
-      clipBar.style.display = state.session.audio_available && isEditMode() ? "grid" : "none";
-      clipSummary.style.display = state.session.audio_available && isEditMode() ? "block" : "none";
       clipSummary.textContent = activeClipEnd === null
         ? `Clip: ${formatSeconds(activeClipStart)} to end of song`
         : `Clip: ${formatSeconds(activeClipStart)} to ${formatSeconds(activeClipEnd)}`;
@@ -1275,31 +1357,27 @@ PREPARE_HTML = """<!doctype html>
       resetSavedTimingsButton.disabled = !Boolean(state.session.saved_output_path);
       if (canCaptureCurrent) {
         startButton.style.display = "none";
-        startFromSelectedButton.style.display = "none";
         saveButton.style.display = "inline-block";
         primaryControls.style.justifyContent = "flex-start";
       } else if (reviewMode) {
         startButton.style.display = "inline-block";
-        startFromSelectedButton.style.display = isEditMode() ? "inline-block" : "none";
         saveButton.style.display = "none";
         primaryControls.style.justifyContent = "flex-start";
       } else {
         startButton.style.display = "inline-block";
-        startFromSelectedButton.style.display = isEditMode() ? "inline-block" : "none";
         saveButton.style.display = "none";
         primaryControls.style.justifyContent = "flex-start";
       }
       startButton.disabled = canCaptureCurrent;
+      startFromSelectedButton.disabled = !canStartFromSelected;
       modeCaption.textContent = canCaptureCurrent
         ? "Click the lyric line when the song reaches it. Space also captures the current line."
         : (reviewMode
-          ? "Press play to review from the first saved cue. Clicking a saved line jumps the audio there for quick checking."
+          ? "Press play to review from the first saved cue. Clicking a saved line jumps the audio there."
           : "Start capture, then click the current lyric line as the external song plays.");
-      if (state.session.audio_available && isEditMode()) {
-        modeCaption.textContent = "Set where training should begin and end. Saved timings inside the old clip are cleared when you save a new clip.";
+      if (state.session.audio_available && advancedTools.open) {
+        modeCaption.textContent = "Advanced tools are open. Use Set Start and Set End only if you want to train from a clipped section of the song.";
       }
-      toggleModeButton.textContent = isEditMode() ? "Back To Capture" : "Edit Timings";
-      document.body.classList.toggle("focus-mode", !isEditMode());
       capturedList.innerHTML = "";
       let activeItem = null;
       let selectedItem = null;
@@ -1360,9 +1438,9 @@ PREPARE_HTML = """<!doctype html>
             state.selectedCueIndex = index;
             setTimelineFeedback(
               "Line selected",
-              `${cueSummary(cue)} is selected. Seek the audio where this line should begin, then click Start From Selected.`,
+              `${cueSummary(cue)} is selected. Open More Tools if you want to start training from this line.`,
             );
-            setBanner("Line selected. Use Start From Selected.");
+            setBanner("Line selected.");
             render();
           });
         }
@@ -1617,10 +1695,6 @@ PREPARE_HTML = """<!doctype html>
         render();
         updateTimer();
       } catch (error) { setBanner(error.message, "error"); }
-    });
-    toggleModeButton.addEventListener("click", () => {
-      state.mode = isEditMode() ? "capture" : "edit";
-      render();
     });
     async function nudgeSelected(deltaSeconds) {
       if (state.selectedCueIndex === null) { setBanner("Select a timed line first.", "error"); return; }
